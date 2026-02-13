@@ -55,17 +55,42 @@ serve(async (req) => {
   try {
     const { serviceKey, itemName, pageNo = 1, numOfRows = 100 } = await req.json();
 
-    if (!serviceKey || !itemName) {
+    // Input validation
+    if (!serviceKey || typeof serviceKey !== 'string' || serviceKey.length < 10 || serviceKey.length > 300) {
       return new Response(
-        JSON.stringify({ error: 'serviceKey and itemName are required' }),
+        JSON.stringify({ error: 'Invalid service key' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    if (!itemName || typeof itemName !== 'string' || itemName.length === 0 || itemName.length > 200) {
+      return new Response(
+        JSON.stringify({ error: 'Invalid item name' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const pageNumber = parseInt(String(pageNo));
+    const rowCount = parseInt(String(numOfRows));
+
+    if (isNaN(pageNumber) || pageNumber < 1 || pageNumber > 1000) {
+      return new Response(
+        JSON.stringify({ error: 'Invalid page number' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    if (isNaN(rowCount) || rowCount < 1 || rowCount > 1000) {
+      return new Response(
+        JSON.stringify({ error: 'Invalid rows count' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
     const baseParams: Record<string, string> = {
       serviceKey,
-      pageNo: String(pageNo),
-      numOfRows: String(numOfRows),
+      pageNo: String(pageNumber),
+      numOfRows: String(rowCount),
       type: 'json',
     };
 
@@ -96,10 +121,9 @@ serve(async (req) => {
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   } catch (error) {
-    const msg = error instanceof Error ? error.message : 'Unknown error';
-    console.error('MFDS proxy error:', msg);
+    console.error('MFDS proxy error:', error instanceof Error ? error.message : error);
     return new Response(
-      JSON.stringify({ error: msg }),
+      JSON.stringify({ error: 'Service temporarily unavailable', code: 'PROXY_ERROR' }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
