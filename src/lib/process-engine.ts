@@ -18,6 +18,8 @@ interface ProcessOptions {
   serviceKey: string;
   products: { product: string; 순번?: string }[];
   onProgress: (current: number, total: number) => void;
+  /** Pre-confirmed translations from user review step */
+  confirmedTranslations?: Map<string, string>;
 }
 
 async function sleep(ms: number) {
@@ -58,7 +60,7 @@ function isEnglishKey(key: string): boolean {
 }
 
 /** Translate English drug names to Korean via AI edge function */
-async function translateEngToKor(
+export async function translateEngToKor(
   supabaseUrl: string,
   anonKey: string,
   engNames: string[]
@@ -95,26 +97,30 @@ async function translateEngToKor(
   return result;
 }
 
+/** Get unique cleaned keys and identify which are English */
+export function getUniqueKeys(products: { product: string }[]): {
+  cleanedKeys: string[];
+  uniqueKeys: string[];
+  engKeys: string[];
+} {
+  const cleanedKeys = products.map((p) => cleanProduct(p.product));
+  const uniqueKeys = [...new Set(cleanedKeys)];
+  const engKeys = uniqueKeys.filter(isEnglishKey);
+  return { cleanedKeys, uniqueKeys, engKeys };
+}
+
 export async function processProducts(opts: ProcessOptions): Promise<ProcessResult[]> {
-  const { supabaseUrl, anonKey, serviceKey, products, onProgress } = opts;
+  const { supabaseUrl, anonKey, serviceKey, products, onProgress, confirmedTranslations } = opts;
 
   // Build cleaned keys and dedup
   const cleanedKeys = products.map((p) => cleanProduct(p.product));
   const uniqueKeys = [...new Set(cleanedKeys)];
 
-  // Separate English and Korean keys
-  const engKeys = uniqueKeys.filter(isEnglishKey);
-  const korKeys = uniqueKeys.filter((k) => !isEnglishKey(k));
-
-  // Step 1: Translate English drug names to Korean
-  const translations = await translateEngToKor(supabaseUrl, anonKey, engKeys);
-  console.log(`Translated ${translations.size}/${engKeys.length} English names to Korean`);
-
-  // Build search map: cleanedKey -> searchTerm (translated or original)
+  // Build search map using confirmed translations if provided
   const searchMap = new Map<string, string>();
   for (const key of uniqueKeys) {
-    if (isEnglishKey(key)) {
-      searchMap.set(key, translations.get(key) || key);
+    if (isEnglishKey(key) && confirmedTranslations) {
+      searchMap.set(key, confirmedTranslations.get(key) || key);
     } else {
       searchMap.set(key, key);
     }
