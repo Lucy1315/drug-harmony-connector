@@ -52,6 +52,7 @@ async function loadFromExcel(): Promise<MFDSCandidate[]> {
       mfdsItemName: itemName,
       mfdsEngName: String(row['제품영문명'] || '').trim(),
       ingredient: String(row['주성분'] || '').trim(),
+      ingredientEng: String(row['주성분영문'] || '').trim(),
       permitDate: parsePermitDate(row['허가일']),
       permitNo: String(row['허가번호'] || '').trim(),
       itemSeq: String(row['품목기준코드'] || '').trim(),

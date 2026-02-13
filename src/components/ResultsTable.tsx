@@ -137,12 +137,12 @@ export default function ResultsTable({ results }: ResultsTableProps) {
                   <td className="px-3 py-1.5 text-xs text-muted-foreground">{page * PAGE_SIZE + i + 1}</td>
                   <td className="px-3 py-1.5 font-medium text-foreground">{r.product}</td>
                   <td className="px-3 py-1.5 text-center">
-                    {r.originalFlag && (
-                      <span className="inline-block bg-primary/10 text-primary font-bold text-xs px-2 py-0.5 rounded">O</span>
-                    )}
+                    <span className={`inline-block font-bold text-xs px-2 py-0.5 rounded ${
+                      r.originalFlag === 'O' ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'
+                    }`}>{r.originalFlag || 'X'}</span>
                   </td>
                   <td className="px-3 py-1.5 text-center table-cell-mono">{r.genericCount || ''}</td>
-                  <td className="px-3 py-1.5 text-foreground">{r.ingredient || '—'}</td>
+                  <td className="px-3 py-1.5 text-foreground">{r.ingredientEng || r.ingredient || '—'}</td>
                   <td className="px-3 py-1.5 text-muted-foreground text-xs max-w-xs">
                     <MfdsNameCell names={r.mfdsItemName} fuzzy={r.matchQuality === 'FUZZY'} originalNames={r.originalMfdsNames} />
                   </td>

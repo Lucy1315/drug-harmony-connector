@@ -104,9 +104,9 @@ const Index = () => {
     if (type === 'results') {
       const data = matched.map((r) => ({
         '제품명': r.product,
-        '식약처 오리지널 품목허가': r.originalFlag,
+        '식약처 오리지널 품목허가': r.originalFlag || 'X',
         '제네릭 수 (개)': r.genericCount || '',
-        '성분명': r.ingredient,
+        '성분명': r.ingredientEng || r.ingredient,
         'MFDS 제품명': r.mfdsItemName,
         '순번': r.순번,
       }));
