@@ -25,6 +25,13 @@ function normalizeItems(data: any): { items: any[]; totalCount: number } {
   return { items, totalCount };
 }
 
+function normalizeFieldNames(item: any): any {
+  return {
+    ...item,
+    PRMSN_DT: item.PRMSN_DT || item.ITEM_PERMIT_DATE || '',
+  };
+}
+
 async function fetchMFDS(params: Record<string, string>): Promise<any> {
   const url = `${MFDS_BASE}?${new URLSearchParams(params).toString()}`;
   const response = await fetch(url);
@@ -33,6 +40,10 @@ async function fetchMFDS(params: Record<string, string>): Promise<any> {
     throw new Error(`MFDS API error [${response.status}]: ${text}`);
   }
   return response.json();
+}
+
+function isKorean(s: string): boolean {
+  return /[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F]/.test(s);
 }
 
 serve(async (req) => {
@@ -50,50 +61,29 @@ serve(async (req) => {
       );
     }
 
-    const baseParams = {
+    const baseParams: Record<string, string> = {
       serviceKey,
       pageNo: String(pageNo),
       numOfRows: String(numOfRows),
       type: 'json',
     };
 
-    // Detect if input is Korean (contains Hangul characters)
-    const isKorean = /[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F]/.test(itemName);
-
-    let result: { items: any[]; totalCount: number };
-
-    if (isKorean) {
-      // Korean input: search by item_name (Korean product name)
-      const data = await fetchMFDS({ ...baseParams, item_name: itemName });
-      result = normalizeItems(data);
-    } else {
-      // English input: try item_eng_name first (undocumented), fallback to item_name
-      // Strategy 1: Try item_eng_name parameter
-      const data1 = await fetchMFDS({ ...baseParams, item_eng_name: itemName });
-      result = normalizeItems(data1);
-
-      if (result.totalCount === 0) {
-        // Strategy 2: Try item_name with English (sometimes works for partial matches)
-        const data2 = await fetchMFDS({ ...baseParams, item_name: itemName });
-        result = normalizeItems(data2);
-      }
-
-      if (result.totalCount === 0) {
-        // Strategy 3: Try searching by entp_eng_name (English company name won't help)
-        // Strategy 3 actually: Search without suffix words
-        // Extract the first word/brand name and try
-        const firstWord = itemName.split(/[\s.]+/)[0];
-        if (firstWord && firstWord !== itemName) {
-          const data3 = await fetchMFDS({ ...baseParams, item_eng_name: firstWord });
-          result = normalizeItems(data3);
-        }
-      }
-    }
-
-    console.log(`Query: "${itemName}" (${isKorean ? 'KR' : 'EN'}) => ${result.totalCount} results`);
+    // MFDS API only supports Korean item_name search.
+    // For Korean input: direct search
+    // For English input: try item_name anyway (some Korean names contain English), 
+    //   then return what we find. Client-side matching handles ITEM_ENG_NAME filtering.
+    const data = await fetchMFDS({ ...baseParams, item_name: itemName });
+    const normalized = normalizeItems(data);
+    const items = normalized.items.map(normalizeFieldNames);
+    
+    console.log(`Search "${itemName}" (${isKorean(itemName) ? 'KR' : 'EN'}) => ${normalized.totalCount} results`);
 
     return new Response(
-      JSON.stringify(result),
+      JSON.stringify({ 
+        items, 
+        totalCount: normalized.totalCount,
+        searchedAsKorean: isKorean(itemName),
+      }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   } catch (error) {
