@@ -1,15 +1,18 @@
 import { useState, useCallback } from 'react';
-import { Pill, Loader2, Download, Key, Eye, EyeOff, FileText, AlertTriangle, CheckCircle2, Beaker, Layers } from 'lucide-react';
+import { Pill, Loader2, Download, Key, Eye, EyeOff, FileText, AlertTriangle, CheckCircle2, Beaker, Layers, Languages } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import FileUpload, { type InputRow } from '@/components/FileUpload';
 import ResultsTable from '@/components/ResultsTable';
 import UnmatchedSection from '@/components/UnmatchedSection';
 import ProgressBar from '@/components/ProgressBar';
+import TranslationReview, { type TranslationEntry } from '@/components/TranslationReview';
 import { buildFinalRows, computeAggregates, type FinalRow, type UnmatchedRow, type MFDSCandidate, type MatchedResult } from '@/lib/drug-matcher';
-import { processProducts } from '@/lib/process-engine';
+import { processProducts, translateEngToKor, getUniqueKeys } from '@/lib/process-engine';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
+
+type AppPhase = 'idle' | 'translating' | 'review' | 'processing' | 'done';
 
 const Index = () => {
   const [apiKey, setApiKey] = useState('');
@@ -17,15 +20,36 @@ const Index = () => {
   const [inputRows, setInputRows] = useState<InputRow[]>([]);
   const [matched, setMatched] = useState<FinalRow[]>([]);
   const [unmatched, setUnmatched] = useState<UnmatchedRow[]>([]);
-  const [processing, setProcessing] = useState(false);
+  const [phase, setPhase] = useState<AppPhase>('idle');
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [activeTab, setActiveTab] = useState<'results' | 'unmatched'>('results');
-  const [done, setDone] = useState(false);
+  const [translationEntries, setTranslationEntries] = useState<TranslationEntry[]>([]);
 
   const handleProcess = useCallback(async () => {
     if (!apiKey.trim() || inputRows.length === 0) return;
-    setProcessing(true);
-    setDone(false);
+
+    const { engKeys } = getUniqueKeys(inputRows);
+
+    if (engKeys.length > 0) {
+      // Phase 1: Translate English names first
+      setPhase('translating');
+      const translations = await translateEngToKor(SUPABASE_URL, SUPABASE_KEY, engKeys);
+
+      // Build review entries
+      const entries: TranslationEntry[] = engKeys.map((eng) => ({
+        eng,
+        kor: translations.get(eng) || eng,
+      }));
+      setTranslationEntries(entries);
+      setPhase('review');
+    } else {
+      // No English names, go straight to processing
+      runAnalysis(new Map());
+    }
+  }, [apiKey, inputRows]);
+
+  const runAnalysis = useCallback(async (confirmedTranslations: Map<string, string>) => {
+    setPhase('processing');
     setMatched([]);
     setUnmatched([]);
     setActiveTab('results');
@@ -36,20 +60,32 @@ const Index = () => {
       serviceKey: apiKey.trim(),
       products: inputRows,
       onProgress: (current, total) => setProgress({ current, total }),
+      confirmedTranslations,
     });
 
     const { matched: m, unmatched: u } = buildFinalRows(results, inputRows);
     setMatched(m);
     setUnmatched(u);
-    setProcessing(false);
-    setDone(true);
+    setPhase('done');
   }, [apiKey, inputRows]);
+
+  const handleTranslationConfirm = useCallback((entries: TranslationEntry[]) => {
+    const translationMap = new Map<string, string>();
+    for (const e of entries) {
+      translationMap.set(e.eng, e.kor);
+    }
+    runAnalysis(translationMap);
+  }, [runAnalysis]);
+
+  const handleTranslationCancel = useCallback(() => {
+    setPhase('idle');
+    setTranslationEntries([]);
+  }, []);
 
   const handleManualMatch = useCallback((unmatchedIndex: number, candidate: MFDSCandidate) => {
     const row = unmatched[unmatchedIndex];
     if (!row) return;
 
-    // Find the matched row corresponding to this unmatched product and update it
     setMatched((prev) => {
       const updated = [...prev];
       const idx = updated.findIndex((m) => m.product === row.product && !m.ingredient);
@@ -64,7 +100,6 @@ const Index = () => {
       return updated;
     });
 
-    // Remove from unmatched
     setUnmatched((prev) => prev.filter((_, i) => i !== unmatchedIndex));
   }, [unmatched]);
 
@@ -97,7 +132,9 @@ const Index = () => {
     }
   };
 
-  const canProcess = apiKey.trim().length > 0 && inputRows.length > 0 && !processing;
+  const processing = phase === 'processing' || phase === 'translating';
+  const done = phase === 'done';
+  const canProcess = apiKey.trim().length > 0 && inputRows.length > 0 && !processing && phase !== 'review';
   const matchedCount = done ? matched.filter((r) => r.ingredient).length : 0;
   const unmatchedCount = done ? unmatched.length : 0;
   const uniqueIngredients = done ? new Set(matched.map((r) => r.ingredient).filter(Boolean)).size : 0;
@@ -155,11 +192,17 @@ const Index = () => {
             className="w-full inline-flex items-center justify-center gap-2 rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {processing && <Loader2 className="h-4 w-4 animate-spin" />}
-            {processing ? '처리 중...' : '분석 실행'}
+            {phase === 'translating' ? '번역 중...' : processing ? '처리 중...' : '분석 실행'}
           </button>
 
           {/* Progress */}
-          {processing && (
+          {phase === 'translating' && (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Languages className="h-3.5 w-3.5 animate-pulse text-primary" />
+              영문 제품명 번역 중...
+            </div>
+          )}
+          {phase === 'processing' && (
             <ProgressBar
               current={progress.current}
               total={progress.total}
@@ -170,11 +213,37 @@ const Index = () => {
 
         {/* Main area */}
         <main className="flex-1 overflow-y-auto p-4 space-y-4">
-          {!done && !processing && (
+          {phase === 'idle' && (
             <div className="flex items-center justify-center h-full">
               <div className="text-center text-muted-foreground space-y-2">
                 <Beaker className="h-12 w-12 mx-auto opacity-30" />
                 <p className="text-sm">엑셀 파일과 API 키를 입력한 후 분석을 실행하세요.</p>
+              </div>
+            </div>
+          )}
+
+          {phase === 'translating' && (
+            <div className="flex items-center justify-center h-full">
+              <div className="text-center text-muted-foreground space-y-2">
+                <Languages className="h-12 w-12 mx-auto opacity-30 animate-pulse" />
+                <p className="text-sm">영문 제품명을 한국어로 번역하고 있습니다...</p>
+              </div>
+            </div>
+          )}
+
+          {phase === 'review' && (
+            <TranslationReview
+              translations={translationEntries}
+              onConfirm={handleTranslationConfirm}
+              onCancel={handleTranslationCancel}
+            />
+          )}
+
+          {phase === 'processing' && (
+            <div className="flex items-center justify-center h-full">
+              <div className="text-center text-muted-foreground space-y-2">
+                <Loader2 className="h-12 w-12 mx-auto opacity-30 animate-spin" />
+                <p className="text-sm">MFDS 데이터 분석 중...</p>
               </div>
             </div>
           )}
