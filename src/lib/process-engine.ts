@@ -30,12 +30,11 @@ async function fetchWithRetry(
   supabaseUrl: string,
   anonKey: string,
   serviceKey: string,
-  itemName: string,
-  isEnglish: boolean
+  itemName: string
 ): Promise<MFDSItem[]> {
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
-      const { items } = await queryMFDS(supabaseUrl, anonKey, serviceKey, itemName, { isEnglish });
+      const { items } = await queryMFDS(supabaseUrl, anonKey, serviceKey, itemName);
       return items;
     } catch (err) {
       if (attempt === MAX_RETRIES) throw err;
@@ -70,9 +69,8 @@ export async function processProducts(opts: ProcessOptions): Promise<ProcessResu
   let completed = 0;
 
   async function processKey(key: string) {
-    const isEnglish = !/[\uAC00-\uD7AF]/.test(key);
     try {
-      const items = await fetchWithRetry(supabaseUrl, anonKey, serviceKey, key, isEnglish);
+      const items = await fetchWithRetry(supabaseUrl, anonKey, serviceKey, key);
       cache.set(key, itemsToCandidates(items));
     } catch (err) {
       cache.set(key, err instanceof Error ? err : new Error(String(err)));

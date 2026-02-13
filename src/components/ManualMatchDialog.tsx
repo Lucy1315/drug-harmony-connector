@@ -30,7 +30,7 @@ export default function ManualMatchDialog({
     setSearched(true);
     try {
       const isEng = searchByEng || !/[\uAC00-\uD7AF]/.test(query.trim());
-      const { items } = await queryMFDS(supabaseUrl, anonKey, serviceKey, query.trim(), { isEnglish: isEng });
+      const { items } = await queryMFDS(supabaseUrl, anonKey, serviceKey, query.trim());
       setResults(items);
     } catch {
       setResults([]);

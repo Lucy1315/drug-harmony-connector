@@ -53,11 +53,11 @@ serve(async (req) => {
   }
 
   try {
-    const { serviceKey, itemName, itemEngName, pageNo = 1, numOfRows = 100 } = await req.json();
+    const { serviceKey, itemName, pageNo = 1, numOfRows = 100 } = await req.json();
 
-    if (!serviceKey || (!itemName && !itemEngName)) {
+    if (!serviceKey || !itemName) {
       return new Response(
-        JSON.stringify({ error: 'serviceKey and (itemName or itemEngName) are required' }),
+        JSON.stringify({ error: 'serviceKey and itemName are required' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
@@ -69,15 +69,17 @@ serve(async (req) => {
       type: 'json',
     };
 
-    // If itemEngName is provided, search by item_eng_name parameter
-    // If itemName is provided, search by item_name parameter
-    if (itemEngName) {
-      baseParams['item_eng_name'] = itemEngName;
-      console.log(`Searching by ITEM_ENG_NAME: "${itemEngName}"`);
-    } else {
-      baseParams['item_name'] = itemName;
-      console.log(`Searching by item_name: "${itemName}"`);
-    }
+    const isKoreanInput = isKorean(itemName);
+
+    // IMPORTANT: The MFDS API's item_eng_name parameter does NOT work for filtering.
+    // It gets ignored and returns ALL 44k+ results unfiltered.
+    // So we ALWAYS use item_name for search.
+    // - Korean input: item_name search works directly.
+    // - English input: item_name search will return 0 results (expected).
+    //   The client should mark these as NO_RESULT_ENG.
+    baseParams['item_name'] = itemName;
+
+    console.log(`Searching by item_name: "${itemName}" (${isKoreanInput ? 'KR' : 'EN'})`);
 
     const data = await fetchMFDS(baseParams);
     const normalized = normalizeItems(data);
@@ -89,6 +91,7 @@ serve(async (req) => {
       JSON.stringify({
         items,
         totalCount: normalized.totalCount,
+        searchedAsKorean: isKoreanInput,
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
