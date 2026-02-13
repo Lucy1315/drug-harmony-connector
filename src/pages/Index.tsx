@@ -5,7 +5,7 @@ import FileUpload, { type InputRow } from '@/components/FileUpload';
 import ResultsTable from '@/components/ResultsTable';
 import UnmatchedSection from '@/components/UnmatchedSection';
 import ProgressBar from '@/components/ProgressBar';
-import { buildFinalRows, type FinalRow, type UnmatchedRow } from '@/lib/drug-matcher';
+import { buildFinalRows, computeAggregates, type FinalRow, type UnmatchedRow, type MFDSCandidate, type MatchedResult } from '@/lib/drug-matcher';
 import { processProducts } from '@/lib/process-engine';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
@@ -44,6 +44,29 @@ const Index = () => {
     setProcessing(false);
     setDone(true);
   }, [apiKey, inputRows]);
+
+  const handleManualMatch = useCallback((unmatchedIndex: number, candidate: MFDSCandidate) => {
+    const row = unmatched[unmatchedIndex];
+    if (!row) return;
+
+    // Find the matched row corresponding to this unmatched product and update it
+    setMatched((prev) => {
+      const updated = [...prev];
+      const idx = updated.findIndex((m) => m.product === row.product && !m.ingredient);
+      if (idx !== -1) {
+        updated[idx] = {
+          ...updated[idx],
+          ingredient: candidate.ingredient || '',
+          mfdsItemName: candidate.mfdsItemName || '',
+          matchQuality: 'EXACT',
+        };
+      }
+      return updated;
+    });
+
+    // Remove from unmatched
+    setUnmatched((prev) => prev.filter((_, i) => i !== unmatchedIndex));
+  }, [unmatched]);
 
   const exportExcel = (type: 'results' | 'unmatched') => {
     if (type === 'results') {
@@ -190,7 +213,15 @@ const Index = () => {
               </div>
 
               {activeTab === 'results' && <ResultsTable results={matched} />}
-              {activeTab === 'unmatched' && <UnmatchedSection rows={unmatched} />}
+              {activeTab === 'unmatched' && (
+                <UnmatchedSection
+                  rows={unmatched}
+                  supabaseUrl={SUPABASE_URL}
+                  anonKey={SUPABASE_KEY}
+                  serviceKey={apiKey}
+                  onManualMatch={handleManualMatch}
+                />
+              )}
             </>
           )}
         </main>

@@ -1,8 +1,15 @@
-import { AlertTriangle } from 'lucide-react';
+import { useState } from 'react';
+import { Search } from 'lucide-react';
 import type { UnmatchedRow } from '@/lib/drug-matcher';
+import type { MFDSCandidate } from '@/lib/drug-matcher';
+import ManualMatchDialog from './ManualMatchDialog';
 
 interface UnmatchedSectionProps {
   rows: UnmatchedRow[];
+  supabaseUrl: string;
+  anonKey: string;
+  serviceKey: string;
+  onManualMatch: (rowIndex: number, candidate: MFDSCandidate) => void;
 }
 
 const REASON_LABELS: Record<string, string> = {
@@ -13,7 +20,9 @@ const REASON_LABELS: Record<string, string> = {
   API_ERROR: 'API 오류',
 };
 
-export default function UnmatchedSection({ rows }: UnmatchedSectionProps) {
+export default function UnmatchedSection({ rows, supabaseUrl, anonKey, serviceKey, onManualMatch }: UnmatchedSectionProps) {
+  const [dialogRow, setDialogRow] = useState<{ index: number; row: UnmatchedRow } | null>(null);
+
   if (rows.length === 0) return null;
 
   return (
@@ -28,6 +37,7 @@ export default function UnmatchedSection({ rows }: UnmatchedSectionProps) {
               <th className="px-3 py-2 text-left text-xs font-semibold text-foreground">검색 키</th>
               <th className="px-3 py-2 text-left text-xs font-semibold text-foreground">사유</th>
               <th className="px-3 py-2 text-left text-xs font-semibold text-foreground">후보 수</th>
+              <th className="px-3 py-2 text-center text-xs font-semibold text-foreground w-20">수동 매칭</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-warning/20">
@@ -39,11 +49,36 @@ export default function UnmatchedSection({ rows }: UnmatchedSectionProps) {
                 <td className="px-3 py-1.5 text-xs text-muted-foreground table-cell-mono">{r.cleanedKey}</td>
                 <td className="px-3 py-1.5 text-xs text-destructive">{REASON_LABELS[r.reason] || r.reason}</td>
                 <td className="px-3 py-1.5 text-xs text-muted-foreground table-cell-mono">{r.candidatesCount}</td>
+                <td className="px-3 py-1.5 text-center">
+                  <button
+                    onClick={() => setDialogRow({ index: i, row: r })}
+                    className="inline-flex items-center justify-center gap-1 rounded-md bg-primary/10 text-primary px-2 py-1 text-xs font-medium hover:bg-primary/20 transition-colors"
+                  >
+                    <Search className="h-3 w-3" />
+                    검색
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+
+      {dialogRow && (
+        <ManualMatchDialog
+          open
+          onClose={() => setDialogRow(null)}
+          product={dialogRow.row.product}
+          cleanedKey={dialogRow.row.cleanedKey}
+          supabaseUrl={supabaseUrl}
+          anonKey={anonKey}
+          serviceKey={serviceKey}
+          onSelect={(candidate) => {
+            onManualMatch(dialogRow.index, candidate);
+            setDialogRow(null);
+          }}
+        />
+      )}
     </div>
   );
 }
