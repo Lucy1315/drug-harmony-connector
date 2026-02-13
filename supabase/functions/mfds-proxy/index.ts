@@ -34,6 +34,7 @@ function normalizeFieldNames(item: any): any {
 
 async function fetchMFDS(params: Record<string, string>): Promise<any> {
   const url = `${MFDS_BASE}?${new URLSearchParams(params).toString()}`;
+  console.log(`Fetching: ${url}`);
   const response = await fetch(url);
   if (!response.ok) {
     const text = await response.text();
@@ -52,11 +53,11 @@ serve(async (req) => {
   }
 
   try {
-    const { serviceKey, itemName, pageNo = 1, numOfRows = 100 } = await req.json();
+    const { serviceKey, itemName, itemEngName, pageNo = 1, numOfRows = 100 } = await req.json();
 
-    if (!serviceKey || !itemName) {
+    if (!serviceKey || (!itemName && !itemEngName)) {
       return new Response(
-        JSON.stringify({ error: 'serviceKey and itemName are required' }),
+        JSON.stringify({ error: 'serviceKey and (itemName or itemEngName) are required' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
@@ -68,21 +69,26 @@ serve(async (req) => {
       type: 'json',
     };
 
-    // MFDS API only supports Korean item_name search.
-    // For Korean input: direct search
-    // For English input: try item_name anyway (some Korean names contain English), 
-    //   then return what we find. Client-side matching handles ITEM_ENG_NAME filtering.
-    const data = await fetchMFDS({ ...baseParams, item_name: itemName });
+    // If itemEngName is provided, search by item_eng_name parameter
+    // If itemName is provided, search by item_name parameter
+    if (itemEngName) {
+      baseParams['item_eng_name'] = itemEngName;
+      console.log(`Searching by ITEM_ENG_NAME: "${itemEngName}"`);
+    } else {
+      baseParams['item_name'] = itemName;
+      console.log(`Searching by item_name: "${itemName}"`);
+    }
+
+    const data = await fetchMFDS(baseParams);
     const normalized = normalizeItems(data);
     const items = normalized.items.map(normalizeFieldNames);
-    
-    console.log(`Search "${itemName}" (${isKorean(itemName) ? 'KR' : 'EN'}) => ${normalized.totalCount} results`);
+
+    console.log(`Search => ${normalized.totalCount} results, returned ${items.length} items`);
 
     return new Response(
-      JSON.stringify({ 
-        items, 
+      JSON.stringify({
+        items,
         totalCount: normalized.totalCount,
-        searchedAsKorean: isKorean(itemName),
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
