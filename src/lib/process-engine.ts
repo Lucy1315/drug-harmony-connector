@@ -47,8 +47,9 @@ async function fetchWithRetry(
 function itemsToCandidates(items: MFDSItem[]): MFDSCandidate[] {
   return items.map((item) => ({
     mfdsItemName: item.ITEM_NAME || '',
+    mfdsEngName: item.ITEM_ENG_NAME || '',
     ingredient: item.ITEM_INGR_NAME || '',
-    permitDate: item.PRMSN_DT || '',
+    permitDate: item.PRMSN_DT || item.ITEM_PERMIT_DATE || '',
     permitNo: item.PRDUCT_PRMISN_NO || '',
     itemSeq: item.ITEM_SEQ || '',
   }));
@@ -123,13 +124,14 @@ export async function processProducts(opts: ProcessOptions): Promise<ProcessResu
     }
 
     const candidates = cached || [];
+    const isEnglish = !/[\uAC00-\uD7AF]/.test(key);
 
     if (candidates.length === 0) {
       return {
         type: 'unmatched' as const,
         product: row.product,
         cleanedKey: key,
-        reason: 'NO_RESULT' as const,
+        reason: isEnglish ? 'NO_RESULT_ENG' as const : 'NO_RESULT' as const,
         candidatesCount: 0,
       };
     }

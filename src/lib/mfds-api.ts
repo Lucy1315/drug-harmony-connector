@@ -3,10 +3,12 @@
 export interface MFDSItem {
   ITEM_NAME: string;
   PRDUCT_PRMISN_NO: string;
-  PRMSN_DT: string;
+  PRMSN_DT: string;           // normalized by edge function from ITEM_PERMIT_DATE
+  ITEM_PERMIT_DATE?: string;   // raw field from API
   ITEM_INGR_NAME: string;
+  ITEM_ENG_NAME?: string;
   ITEM_SEQ: string;
-  [key: string]: string;
+  [key: string]: string | undefined;
 }
 
 export async function queryMFDS(

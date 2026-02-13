@@ -26,12 +26,13 @@ export function cleanProduct(s: string): string {
 }
 
 export type MatchQuality = 'EXACT' | 'FUZZY';
-export type UnmatchReason = 'NO_RESULT' | 'NO_INGREDIENT' | 'AMBIGUOUS' | 'API_ERROR';
+export type UnmatchReason = 'NO_RESULT' | 'NO_RESULT_ENG' | 'NO_INGREDIENT' | 'AMBIGUOUS' | 'API_ERROR';
 
 export interface MFDSCandidate {
   mfdsItemName: string;
+  mfdsEngName?: string;
   ingredient: string;
-  permitDate: string; // raw PRMSN_DT string e.g. "19950101"
+  permitDate: string; // raw PRMSN_DT / ITEM_PERMIT_DATE string e.g. "19950101"
   permitNo: string;
   itemSeq: string;
 }
@@ -73,23 +74,61 @@ export interface UnmatchedRow {
   candidatesCount: number;
 }
 
+// Clean English name for comparison
+function cleanEngName(s: string): string {
+  return s.toUpperCase().replace(/\./g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function isKoreanStr(s: string): boolean {
+  return /[\uAC00-\uD7AF]/.test(s);
+}
+
 export function findBestMatch(
   cleanedKey: string,
   candidates: MFDSCandidate[]
 ): { candidate: MFDSCandidate; quality: MatchQuality } | null {
   if (candidates.length === 0) return null;
 
-  // Exact matches
-  const exact = candidates.filter(
-    (c) => cleanProduct(c.mfdsItemName) === cleanedKey
-  );
+  const keyIsKorean = isKoreanStr(cleanedKey);
 
-  if (exact.length > 0) {
-    const sorted = [...exact].sort((a, b) => (a.permitDate || '99999999').localeCompare(b.permitDate || '99999999'));
-    return { candidate: sorted[0], quality: 'EXACT' };
+  if (keyIsKorean) {
+    // Korean matching: compare cleaned ITEM_NAME
+    const exact = candidates.filter(
+      (c) => cleanProduct(c.mfdsItemName) === cleanedKey
+    );
+
+    if (exact.length > 0) {
+      const sorted = [...exact].sort((a, b) => (a.permitDate || '99999999').localeCompare(b.permitDate || '99999999'));
+      return { candidate: sorted[0], quality: 'EXACT' };
+    }
+  } else {
+    // English matching: compare cleaned ITEM_ENG_NAME
+    const cleanedKeyEng = cleanEngName(cleanedKey);
+    
+    // Exact match on English name
+    const exactEng = candidates.filter((c) => {
+      const engName = cleanEngName(c.mfdsEngName || '');
+      return engName === cleanedKeyEng;
+    });
+
+    if (exactEng.length > 0) {
+      const sorted = [...exactEng].sort((a, b) => (a.permitDate || '99999999').localeCompare(b.permitDate || '99999999'));
+      return { candidate: sorted[0], quality: 'EXACT' };
+    }
+
+    // Partial: English name starts with or contains the search key
+    const partialEng = candidates.filter((c) => {
+      const engName = cleanEngName(c.mfdsEngName || '');
+      return engName.includes(cleanedKeyEng) || cleanedKeyEng.includes(engName.split(' ')[0]);
+    });
+
+    if (partialEng.length > 0) {
+      const sorted = [...partialEng].sort((a, b) => (a.permitDate || '99999999').localeCompare(b.permitDate || '99999999'));
+      return { candidate: sorted[0], quality: 'EXACT' };
+    }
   }
 
-  // Fuzzy: pick earliest
+  // Fuzzy fallback: pick earliest permitDate
   const sorted = [...candidates].sort((a, b) => (a.permitDate || '99999999').localeCompare(b.permitDate || '99999999'));
   return { candidate: sorted[0], quality: 'FUZZY' };
 }

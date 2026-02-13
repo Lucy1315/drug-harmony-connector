@@ -7,6 +7,7 @@ interface UnmatchedSectionProps {
 
 const REASON_LABELS: Record<string, string> = {
   NO_RESULT: '검색 결과 없음',
+  NO_RESULT_ENG: '영문명 검색 불가 (한국어 제품명 사용 필요)',
   NO_INGREDIENT: '성분 정보 없음',
   AMBIGUOUS: '모호한 결과',
   API_ERROR: 'API 오류',
