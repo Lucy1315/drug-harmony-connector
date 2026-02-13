@@ -35,6 +35,7 @@ export interface MFDSCandidate {
   permitDate: string; // raw PRMSN_DT / ITEM_PERMIT_DATE string e.g. "19950101"
   permitNo: string;
   itemSeq: string;
+  companyName?: string; // 업체명
 }
 
 export interface MatchedResult {
@@ -176,19 +177,19 @@ export function computeAggregates(
     }
   }
 
-  // Group by NORMALIZED ingredient (dosage-independent)
-  // Count unique products by normalized product name (not by permitNo)
-  // e.g. "레볼레이드정25mg" and "레볼레이드정50mg" = 1 product, not 2
-  const ingredientMap = new Map<string, { normalizedProductNames: Set<string>; minDate: string }>();
+  // Group by NORMALIZED ingredient
+  // Count unique company names (업체명) per ingredient group
+  // e.g. same company with 25mg and 50mg = 1 count, different companies = separate counts
+  const ingredientMap = new Map<string, { companyNames: Set<string>; minDate: string }>();
 
   for (const [, c] of masterMap) {
     const ingr = normalizeIngredient(c.ingredient || '');
     if (!ingr) continue;
-    const entry = ingredientMap.get(ingr) || { normalizedProductNames: new Set(), minDate: '99999999' };
-    // Normalize product name to group dosage variants as one product
-    const normalizedName = normalizeDosage(c.mfdsItemName || c.permitNo || '');
-    if (normalizedName) {
-      entry.normalizedProductNames.add(normalizedName);
+    const entry = ingredientMap.get(ingr) || { companyNames: new Set(), minDate: '99999999' };
+    // Count by unique company name (업체명)
+    const company = (c.companyName || '').trim().toUpperCase();
+    if (company) {
+      entry.companyNames.add(company);
     }
     const dt = c.permitDate || '99999999';
     if (dt < entry.minDate) entry.minDate = dt;
@@ -197,7 +198,7 @@ export function computeAggregates(
 
   const result = new Map<string, { genericCount: number; minPermitDate: string }>();
   for (const [ingr, data] of ingredientMap) {
-    result.set(ingr, { genericCount: data.normalizedProductNames.size, minPermitDate: data.minDate });
+    result.set(ingr, { genericCount: data.companyNames.size, minPermitDate: data.minDate });
   }
   return result;
 }
