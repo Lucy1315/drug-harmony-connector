@@ -75,6 +75,25 @@ export interface UnmatchedRow {
   candidatesCount: number;
 }
 
+// Strip dosage/quantity from ingredient to get base ingredient name
+// e.g. "에타너셉트 25밀리그램" → "에타너셉트", "Etanercept 50mg/mL" → "ETANERCEPT"
+export function normalizeIngredient(s: string): string {
+  let n = s.toUpperCase().trim();
+  // Remove parenthetical content like (as ...)
+  n = n.replace(/\(.*?\)/g, '');
+  // Remove dosage patterns: numbers with units (mg, ml, g, %, mcg, ug, IU, unit, 밀리그램, etc.)
+  n = n.replace(/[\d.,]+\s*(MG|ML|G|%|MCG|UG|IU|UNIT|UNITS|밀리그램|그램|밀리리터|리터|마이크로그램|단위|국제단위)\b/gi, '');
+  // Remove standalone numbers with / (e.g., 50mg/mL patterns already partially handled)
+  n = n.replace(/[\d.,]+\s*\/\s*[\d.,]*\s*(MG|ML|G|%|MCG|UG|IU|UNIT|UNITS|밀리그램|그램|밀리리터|리터)?\b/gi, '');
+  // Remove trailing standalone numbers
+  n = n.replace(/\s+[\d.,]+\s*$/g, '');
+  // Remove leading standalone numbers
+  n = n.replace(/^[\d.,]+\s+/g, '');
+  // Collapse spaces and trim
+  n = n.replace(/\s+/g, ' ').trim();
+  return n;
+}
+
 // Clean English name for comparison
 function cleanEngName(s: string): string {
   return s.toUpperCase().replace(/\./g, ' ').replace(/\s+/g, ' ').trim();
@@ -138,14 +157,7 @@ export function computeAggregates(
   matchedResults: MatchedResult[],
   allCandidates?: MFDSCandidate[]
 ): Map<string, { genericCount: number; minPermitDate: string }> {
-  // Collect all unique ingredients from matched results
-  const matchedIngredients = new Set<string>();
-  for (const r of matchedResults) {
-    const ingr = (r.candidate.ingredient || '').toUpperCase().trim();
-    if (ingr) matchedIngredients.add(ingr);
-  }
-
-  // Build master set from ALL candidates (not just matched), deduplicate by permitNo
+  // Build master set from ALL candidates, deduplicate by permitNo
   const masterMap = new Map<string, MFDSCandidate>();
   const candidateSource = allCandidates || matchedResults.map(r => r.candidate);
   for (const c of candidateSource) {
@@ -154,11 +166,11 @@ export function computeAggregates(
     }
   }
 
-  // Group by ingredient
+  // Group by NORMALIZED ingredient (dosage-independent)
   const ingredientMap = new Map<string, { permitNos: Set<string>; minDate: string }>();
 
   for (const [permitNo, c] of masterMap) {
-    const ingr = (c.ingredient || '').toUpperCase().trim();
+    const ingr = normalizeIngredient(c.ingredient || '');
     if (!ingr) continue;
     const entry = ingredientMap.get(ingr) || { permitNos: new Set(), minDate: '99999999' };
     entry.permitNos.add(permitNo);
@@ -183,11 +195,11 @@ export function buildFinalRows(
   const allMatched = results.filter((r): r is MatchedResult => r.type === 'matched');
   const aggregates = computeAggregates(allMatched, allCandidates);
 
-  // Build ingredient → all unique MFDS product names map from all candidates
+  // Build normalized ingredient → all unique MFDS product names map from all candidates
   const ingredientProductNames = new Map<string, Set<string>>();
   if (allCandidates) {
     for (const c of allCandidates) {
-      const ingr = (c.ingredient || '').toUpperCase().trim();
+      const ingr = normalizeIngredient(c.ingredient || '');
       if (!ingr || !c.mfdsItemName) continue;
       if (!ingredientProductNames.has(ingr)) {
         ingredientProductNames.set(ingr, new Set());
@@ -196,11 +208,11 @@ export function buildFinalRows(
     }
   }
 
-  // Build ingredient → original product names (earliest permit date)
+  // Build normalized ingredient → original product names (earliest permit date)
   const ingredientOriginals = new Map<string, Set<string>>();
   if (allCandidates) {
     for (const c of allCandidates) {
-      const ingr = (c.ingredient || '').toUpperCase().trim();
+      const ingr = normalizeIngredient(c.ingredient || '');
       if (!ingr || !c.mfdsItemName) continue;
       const stats = aggregates.get(ingr);
       if (stats && c.permitDate === stats.minPermitDate) {
@@ -237,13 +249,13 @@ export function buildFinalRows(
       continue;
     }
 
-    const ingr = (r.candidate.ingredient || '').toUpperCase().trim();
+    const ingr = normalizeIngredient(r.candidate.ingredient || '');
     const stats = aggregates.get(ingr);
     const genericCount = stats?.genericCount || 0;
     const myDate = r.candidate.permitDate || '99999999';
     const originalFlag = stats && myDate === stats.minPermitDate ? 'O' : '';
 
-    // Get all product names with the same ingredient
+    // Get all product names with the same normalized ingredient
     const allNames = ingredientProductNames.get(ingr);
     const mfdsItemName = allNames && allNames.size > 0
       ? [...allNames].join(', ')
