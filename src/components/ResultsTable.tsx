@@ -4,11 +4,12 @@ import type { FinalRow } from '@/lib/drug-matcher';
 
 const COLLAPSE_THRESHOLD = 3;
 
-function MfdsNameCell({ names, fuzzy }: { names: string; fuzzy: boolean }) {
+function MfdsNameCell({ names, fuzzy, originalNames }: { names: string; fuzzy: boolean; originalNames?: string[] }) {
   const [expanded, setExpanded] = useState(false);
   if (!names) return <span>—</span>;
 
   const items = names.split(', ');
+  const origSet = new Set(originalNames || []);
   const needsCollapse = items.length > COLLAPSE_THRESHOLD;
   const visible = needsCollapse && !expanded ? items.slice(0, COLLAPSE_THRESHOLD) : items;
 
@@ -16,7 +17,10 @@ function MfdsNameCell({ names, fuzzy }: { names: string; fuzzy: boolean }) {
     <div>
       <div className="space-y-0.5">
         {visible.map((name, i) => (
-          <div key={i} className="break-words">{name}</div>
+          <div key={i} className={`break-words ${origSet.has(name) ? 'text-primary font-semibold' : ''}`}>
+            {origSet.has(name) && <span className="inline-block bg-primary/10 text-primary text-[9px] font-bold px-1 py-px rounded mr-1">오리지널</span>}
+            {name}
+          </div>
         ))}
       </div>
       {needsCollapse && (
@@ -140,7 +144,7 @@ export default function ResultsTable({ results }: ResultsTableProps) {
                   <td className="px-3 py-1.5 text-center table-cell-mono">{r.genericCount || ''}</td>
                   <td className="px-3 py-1.5 text-foreground">{r.ingredient || '—'}</td>
                   <td className="px-3 py-1.5 text-muted-foreground text-xs max-w-xs">
-                    <MfdsNameCell names={r.mfdsItemName} fuzzy={r.matchQuality === 'FUZZY'} />
+                    <MfdsNameCell names={r.mfdsItemName} fuzzy={r.matchQuality === 'FUZZY'} originalNames={r.originalMfdsNames} />
                   </td>
                   <td className="px-3 py-1.5 text-xs text-muted-foreground table-cell-mono">{r.순번}</td>
                 </tr>

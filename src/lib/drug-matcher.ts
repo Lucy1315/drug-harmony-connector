@@ -62,6 +62,7 @@ export interface FinalRow {
   genericCount: number;
   ingredient: string;
   mfdsItemName: string;
+  originalMfdsNames?: string[]; // product names with earliest permit date for this ingredient
   순번: string;
   matchQuality?: MatchQuality;
 }
@@ -195,6 +196,20 @@ export function buildFinalRows(
     }
   }
 
+  // Build ingredient → original product names (earliest permit date)
+  const ingredientOriginals = new Map<string, Set<string>>();
+  if (allCandidates) {
+    for (const c of allCandidates) {
+      const ingr = (c.ingredient || '').toUpperCase().trim();
+      if (!ingr || !c.mfdsItemName) continue;
+      const stats = aggregates.get(ingr);
+      if (stats && c.permitDate === stats.minPermitDate) {
+        if (!ingredientOriginals.has(ingr)) ingredientOriginals.set(ingr, new Set());
+        ingredientOriginals.get(ingr)!.add(c.mfdsItemName);
+      }
+    }
+  }
+
   const matched: FinalRow[] = [];
   const unmatched: UnmatchedRow[] = [];
 
@@ -234,12 +249,15 @@ export function buildFinalRows(
       ? [...allNames].join(', ')
       : r.candidate.mfdsItemName || '';
 
+    const originals = ingredientOriginals.get(ingr);
+
     matched.push({
       product: r.product,
       originalFlag,
       genericCount: ingr ? genericCount : 0,
       ingredient: r.candidate.ingredient || '',
       mfdsItemName,
+      originalMfdsNames: originals ? [...originals] : undefined,
       순번,
       matchQuality: r.matchQuality,
     });
