@@ -84,10 +84,9 @@ Example: [{"eng":"ENBREL","kor":"엔브렐"},{"eng":"HUMIRA","kor":"휴미라"},
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   } catch (error) {
-    const msg = error instanceof Error ? error.message : 'Unknown error';
-    console.error('Translation error:', msg);
+    console.error('Translation error:', error instanceof Error ? error.message : error);
     return new Response(
-      JSON.stringify({ error: msg }),
+      JSON.stringify({ error: 'Translation service temporarily unavailable', code: 'TRANSLATION_ERROR' }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
