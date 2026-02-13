@@ -16,18 +16,10 @@ export async function queryMFDS(
   anonKey: string,
   serviceKey: string,
   itemName: string,
-  options?: { isEnglish?: boolean; pageNo?: number; numOfRows?: number }
+  pageNo = 1,
+  numOfRows = 100
 ): Promise<{ items: MFDSItem[]; totalCount: number }> {
-  const { isEnglish = false, pageNo = 1, numOfRows = 100 } = options || {};
   const url = `${supabaseUrl}/functions/v1/mfds-proxy`;
-
-  // English names use item_eng_name parameter, Korean names use item_name
-  const body: Record<string, any> = { serviceKey, pageNo, numOfRows };
-  if (isEnglish) {
-    body.itemEngName = itemName;
-  } else {
-    body.itemName = itemName;
-  }
 
   const response = await fetch(url, {
     method: 'POST',
@@ -35,7 +27,7 @@ export async function queryMFDS(
       'Content-Type': 'application/json',
       'apikey': anonKey,
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ serviceKey, itemName, pageNo, numOfRows }),
   });
 
   if (!response.ok) {
