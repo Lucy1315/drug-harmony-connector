@@ -29,11 +29,14 @@ const Index = () => {
     if (!apiKey.trim() || inputRows.length === 0) return;
 
     const { engKeys } = getUniqueKeys(inputRows);
+    console.log('[DEBUG] handleProcess called, engKeys count:', engKeys.length, 'sample:', engKeys.slice(0, 3));
 
     if (engKeys.length > 0) {
       // Phase 1: Translate English names first
       setPhase('translating');
+      console.log('[DEBUG] Starting translation for', engKeys.length, 'English names');
       const translations = await translateEngToKor(SUPABASE_URL, SUPABASE_KEY, engKeys);
+      console.log('[DEBUG] Translation complete, got', translations.size, 'results');
 
       // Build review entries
       const entries: TranslationEntry[] = engKeys.map((eng) => ({
@@ -42,8 +45,9 @@ const Index = () => {
       }));
       setTranslationEntries(entries);
       setPhase('review');
+      console.log('[DEBUG] Phase set to review, entries:', entries.length);
     } else {
-      // No English names, go straight to processing
+      console.log('[DEBUG] No English keys, going straight to analysis');
       runAnalysis(new Map());
     }
   }, [apiKey, inputRows]);
