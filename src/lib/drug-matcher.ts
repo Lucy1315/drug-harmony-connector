@@ -32,10 +32,11 @@ export interface MFDSCandidate {
   mfdsItemName: string;
   mfdsEngName?: string;
   ingredient: string;
-  permitDate: string; // raw PRMSN_DT / ITEM_PERMIT_DATE string e.g. "19950101"
+  ingredientEng?: string; // 주성분영문
+  permitDate: string;
   permitNo: string;
   itemSeq: string;
-  companyName?: string; // 업체명
+  companyName?: string;
 }
 
 export interface MatchedResult {
@@ -59,11 +60,12 @@ export type ProcessResult = MatchedResult | UnmatchedResult;
 
 export interface FinalRow {
   product: string;
-  originalFlag: string; // "O" or ""
+  originalFlag: string; // "O" or "X"
   genericCount: number;
   ingredient: string;
+  ingredientEng?: string; // English ingredient name
   mfdsItemName: string;
-  originalMfdsNames?: string[]; // product names with earliest permit date for this ingredient
+  originalMfdsNames?: string[];
   순번: string;
   matchQuality?: MatchQuality;
 }
@@ -258,7 +260,7 @@ export function buildFinalRows(
       });
       matched.push({
         product: r.product,
-        originalFlag: '',
+        originalFlag: 'X',
         genericCount: 0,
         ingredient: '',
         mfdsItemName: '',
@@ -270,8 +272,8 @@ export function buildFinalRows(
     const ingr = normalizeIngredient(r.candidate.ingredient || '');
     const stats = aggregates.get(ingr);
     const genericCount = stats?.genericCount || 0;
-    const myDate = r.candidate.permitDate || '99999999';
-    const originalFlag = stats && myDate === stats.minPermitDate ? 'O' : '';
+    // B열: O if original product exists in MFDS for this ingredient, X if not
+    const originalFlag = ingr && stats ? 'O' : 'X';
 
     // Get all product names with the same normalized ingredient
     const allNames = ingredientProductNames.get(ingr);
@@ -286,6 +288,7 @@ export function buildFinalRows(
       originalFlag,
       genericCount: ingr ? genericCount : 0,
       ingredient: r.candidate.ingredient || '',
+      ingredientEng: r.candidate.ingredientEng || '',
       mfdsItemName,
       originalMfdsNames: originals ? [...originals] : undefined,
       순번,
