@@ -1,16 +1,4 @@
-// MFDS API interaction - all calls happen client-side with user-provided key
-
-const BASE_URL = 'https://apis.data.go.kr/1471000/DrugPrdtPrmsnInfoService07/getDrugPrdtPrmsnInq07';
-
-export interface MFDSApiResponse {
-  header: { resultCode: string; resultMsg: string };
-  body: {
-    totalCount: number;
-    items: MFDSItem[];
-    numOfRows: number;
-    pageNo: number;
-  };
-}
+// MFDS API proxy client - calls edge function to avoid CORS
 
 export interface MFDSItem {
   ITEM_NAME: string;
@@ -22,43 +10,28 @@ export interface MFDSItem {
 }
 
 export async function queryMFDS(
-  apiKey: string,
+  supabaseUrl: string,
+  anonKey: string,
+  serviceKey: string,
   itemName: string,
   pageNo = 1,
   numOfRows = 100
 ): Promise<{ items: MFDSItem[]; totalCount: number }> {
-  const params = new URLSearchParams({
-    serviceKey: apiKey,
-    item_name: itemName,
-    pageNo: String(pageNo),
-    numOfRows: String(numOfRows),
-    type: 'json',
+  const url = `${supabaseUrl}/functions/v1/mfds-proxy`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'apikey': anonKey,
+    },
+    body: JSON.stringify({ serviceKey, itemName, pageNo, numOfRows }),
   });
 
-  const url = `${BASE_URL}?${params.toString()}`;
-  
-  const response = await fetch(url);
-  
   if (!response.ok) {
-    throw new Error(`MFDS API error: ${response.status} ${response.statusText}`);
+    const err = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(err.error || `HTTP ${response.status}`);
   }
 
-  const data = await response.json();
-  
-  // Handle various response structures
-  const body = data?.body;
-  if (!body) {
-    return { items: [], totalCount: 0 };
-  }
-
-  let items: MFDSItem[] = [];
-  if (body.items) {
-    if (Array.isArray(body.items)) {
-      items = body.items;
-    } else if (body.items.item) {
-      items = Array.isArray(body.items.item) ? body.items.item : [body.items.item];
-    }
-  }
-
-  return { items, totalCount: body.totalCount || 0 };
+  return response.json();
 }

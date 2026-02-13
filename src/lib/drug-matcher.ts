@@ -1,120 +1,181 @@
-// Cleaning and matching logic for drug product names
+// Cleaning, matching, and aggregation logic for drug product names
 
-const TRAILING_TOKENS = [
-  'P5V>>', 'EUP>>', 'AB8>>', 'CC4>>', 'MPM>>', 'G-O', '>>'
-];
+const SUFFIX_TOKENS = ['P5V>>', 'EUP>>', 'AB8>>', 'CC4>>', 'MPM>>', 'G-O', '>>'];
 
-export function cleanProductName(name: string): string {
-  let cleaned = name.trim();
-  
-  // Remove trailing tokens (order matters - longer tokens first)
-  const sortedTokens = [...TRAILING_TOKENS].sort((a, b) => b.length - a.length);
+export function cleanProduct(s: string): string {
+  let c = s.trim().toUpperCase();
+  // Replace '.' with space
+  c = c.replace(/\./g, ' ');
+  // Remove suffix tokens (longer first, repeat)
+  const sorted = [...SUFFIX_TOKENS].sort((a, b) => b.length - a.length);
   let changed = true;
   while (changed) {
     changed = false;
-    for (const token of sortedTokens) {
-      if (cleaned.toUpperCase().endsWith(token)) {
-        cleaned = cleaned.slice(0, -token.length).trim();
+    for (const tok of sorted) {
+      // Remove anywhere in string
+      const idx = c.indexOf(tok);
+      if (idx !== -1) {
+        c = (c.slice(0, idx) + c.slice(idx + tok.length)).trim();
         changed = true;
       }
     }
   }
-
-  // Replace '.' with space
-  cleaned = cleaned.replace(/\./g, ' ');
-  // Collapse multiple spaces
-  cleaned = cleaned.replace(/\s+/g, ' ').trim();
-  // Uppercase
-  cleaned = cleaned.toUpperCase();
-
-  return cleaned;
+  // Collapse spaces
+  c = c.replace(/\s+/g, ' ').trim();
+  return c;
 }
 
-export interface MFDSProduct {
-  ITEM_NAME: string;
-  PRDUCT_PRMISN_NO: string;
-  PRMSN_DT: string;
-  ITEM_INGR_NAME: string;
-  순번?: string;
+export type MatchQuality = 'EXACT' | 'FUZZY';
+export type UnmatchReason = 'NO_RESULT' | 'NO_INGREDIENT' | 'AMBIGUOUS' | 'API_ERROR';
+
+export interface MFDSCandidate {
+  mfdsItemName: string;
+  ingredient: string;
+  permitDate: string; // raw PRMSN_DT string e.g. "19950101"
+  permitNo: string;
+  itemSeq: string;
 }
 
-export interface MatchResult {
+export interface MatchedResult {
+  type: 'matched';
   product: string;
   cleanedKey: string;
-  matched: boolean;
-  mfdsProduct?: MFDSProduct;
-  ingredient: string;
-  originalFlag: string;
+  candidate: MFDSCandidate;
+  matchQuality: MatchQuality;
+}
+
+export interface UnmatchedResult {
+  type: 'unmatched';
+  product: string;
+  cleanedKey: string;
+  reason: UnmatchReason;
+  candidatesCount: number;
+  errorMessage?: string;
+}
+
+export type ProcessResult = MatchedResult | UnmatchedResult;
+
+export interface FinalRow {
+  product: string;
+  originalFlag: string; // "O" or ""
   genericCount: number;
+  ingredient: string;
   mfdsItemName: string;
   순번: string;
-  unmatchedReason?: string;
+  matchQuality?: MatchQuality;
+}
+
+export interface UnmatchedRow {
+  순번: string;
+  product: string;
+  cleanedKey: string;
+  reason: UnmatchReason;
+  candidatesCount: number;
 }
 
 export function findBestMatch(
   cleanedKey: string,
-  candidates: MFDSProduct[]
-): MFDSProduct | null {
+  candidates: MFDSCandidate[]
+): { candidate: MFDSCandidate; quality: MatchQuality } | null {
   if (candidates.length === 0) return null;
 
-  // Try exact match on cleaned ITEM_NAME
-  const exactMatches = candidates.filter(
-    (c) => cleanProductName(c.ITEM_NAME || '') === cleanedKey
+  // Exact matches
+  const exact = candidates.filter(
+    (c) => cleanProduct(c.mfdsItemName) === cleanedKey
   );
 
-  const pool = exactMatches.length > 0 ? exactMatches : candidates;
+  if (exact.length > 0) {
+    const sorted = [...exact].sort((a, b) => (a.permitDate || '99999999').localeCompare(b.permitDate || '99999999'));
+    return { candidate: sorted[0], quality: 'EXACT' };
+  }
 
-  // Pick earliest PRMSN_DT
-  const sorted = [...pool].sort((a, b) => {
-    const da = a.PRMSN_DT || '99999999';
-    const db = b.PRMSN_DT || '99999999';
-    return da.localeCompare(db);
-  });
-
-  return sorted[0];
+  // Fuzzy: pick earliest
+  const sorted = [...candidates].sort((a, b) => (a.permitDate || '99999999').localeCompare(b.permitDate || '99999999'));
+  return { candidate: sorted[0], quality: 'FUZZY' };
 }
 
-export function computeAggregates(results: MatchResult[]): MatchResult[] {
+export function computeAggregates(
+  matchedResults: MatchedResult[]
+): Map<string, { genericCount: number; minPermitDate: string }> {
+  // Build master set: deduplicate by permitNo
+  const masterMap = new Map<string, MFDSCandidate>();
+  for (const r of matchedResults) {
+    if (r.candidate.permitNo && !masterMap.has(r.candidate.permitNo)) {
+      masterMap.set(r.candidate.permitNo, r.candidate);
+    }
+  }
+
   // Group by ingredient
-  const ingredientGroups = new Map<string, MatchResult[]>();
-  
-  for (const r of results) {
-    if (!r.matched || !r.ingredient) continue;
-    const key = r.ingredient.toUpperCase().trim();
-    if (!key) continue;
-    const group = ingredientGroups.get(key) || [];
-    group.push(r);
-    ingredientGroups.set(key, group);
+  const ingredientMap = new Map<string, { permitNos: Set<string>; minDate: string }>();
+
+  for (const [permitNo, c] of masterMap) {
+    const ingr = (c.ingredient || '').toUpperCase().trim();
+    if (!ingr) continue;
+    const entry = ingredientMap.get(ingr) || { permitNos: new Set(), minDate: '99999999' };
+    entry.permitNos.add(permitNo);
+    const dt = c.permitDate || '99999999';
+    if (dt < entry.minDate) entry.minDate = dt;
+    ingredientMap.set(ingr, entry);
   }
 
-  // Compute per-ingredient: distinct PRDUCT_PRMISN_NO count and min PRMSN_DT
-  const ingredientStats = new Map<string, { count: number; minDate: string }>();
-  
-  for (const [key, group] of ingredientGroups) {
-    const uniquePermissions = new Set(
-      group
-        .filter((r) => r.mfdsProduct?.PRDUCT_PRMISN_NO)
-        .map((r) => r.mfdsProduct!.PRDUCT_PRMISN_NO)
-    );
-    const minDate = group.reduce((min, r) => {
-      const dt = r.mfdsProduct?.PRMSN_DT || '99999999';
-      return dt < min ? dt : min;
-    }, '99999999');
-    
-    ingredientStats.set(key, { count: uniquePermissions.size, minDate });
+  const result = new Map<string, { genericCount: number; minPermitDate: string }>();
+  for (const [ingr, data] of ingredientMap) {
+    result.set(ingr, { genericCount: data.permitNos.size, minPermitDate: data.minDate });
+  }
+  return result;
+}
+
+export function buildFinalRows(
+  results: ProcessResult[],
+  inputRows: { product: string; 순번?: string }[]
+): { matched: FinalRow[]; unmatched: UnmatchedRow[] } {
+  // Gather all matched for aggregation
+  const allMatched = results.filter((r): r is MatchedResult => r.type === 'matched');
+  const aggregates = computeAggregates(allMatched);
+
+  const matched: FinalRow[] = [];
+  const unmatched: UnmatchedRow[] = [];
+
+  for (let i = 0; i < results.length; i++) {
+    const r = results[i];
+    const input = inputRows[i];
+    const 순번 = input?.순번 || '';
+
+    if (r.type === 'unmatched') {
+      unmatched.push({
+        순번,
+        product: r.product,
+        cleanedKey: r.cleanedKey,
+        reason: r.reason,
+        candidatesCount: r.candidatesCount,
+      });
+      matched.push({
+        product: r.product,
+        originalFlag: '',
+        genericCount: 0,
+        ingredient: '',
+        mfdsItemName: '',
+        순번,
+      });
+      continue;
+    }
+
+    const ingr = (r.candidate.ingredient || '').toUpperCase().trim();
+    const stats = aggregates.get(ingr);
+    const genericCount = stats?.genericCount || 0;
+    const myDate = r.candidate.permitDate || '99999999';
+    const originalFlag = stats && myDate === stats.minPermitDate ? 'O' : '';
+
+    matched.push({
+      product: r.product,
+      originalFlag,
+      genericCount: ingr ? genericCount : 0,
+      ingredient: r.candidate.ingredient || '',
+      mfdsItemName: r.candidate.mfdsItemName || '',
+      순번,
+      matchQuality: r.matchQuality,
+    });
   }
 
-  // Apply to results
-  return results.map((r) => {
-    if (!r.matched || !r.ingredient) return r;
-    const key = r.ingredient.toUpperCase().trim();
-    const stats = ingredientStats.get(key);
-    if (!stats) return r;
-
-    const genericCount = stats.count;
-    const myDate = r.mfdsProduct?.PRMSN_DT || '99999999';
-    const originalFlag = myDate === stats.minDate ? 'O' : '';
-
-    return { ...r, genericCount, originalFlag };
-  });
+  return { matched, unmatched };
 }

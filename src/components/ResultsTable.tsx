@@ -1,25 +1,25 @@
 import { useState, useMemo } from 'react';
-import { Search, Download, ArrowUpDown } from 'lucide-react';
-import * as XLSX from 'xlsx';
-import type { MatchResult } from '@/lib/drug-matcher';
+import { Search, ArrowUpDown, ChevronLeft, ChevronRight } from 'lucide-react';
+import type { FinalRow } from '@/lib/drug-matcher';
 
 interface ResultsTableProps {
-  results: MatchResult[];
+  results: FinalRow[];
 }
 
 type SortKey = 'product' | 'originalFlag' | 'genericCount' | 'ingredient' | 'mfdsItemName';
 type SortDir = 'asc' | 'desc';
 
+const PAGE_SIZE = 25;
+
 export default function ResultsTable({ results }: ResultsTableProps) {
   const [filter, setFilter] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('product');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
-
-  const matched = results.filter((r) => r.matched);
+  const [page, setPage] = useState(0);
 
   const filtered = useMemo(() => {
     const q = filter.toLowerCase();
-    let list = matched;
+    let list = results;
     if (q) {
       list = list.filter(
         (r) =>
@@ -28,12 +28,11 @@ export default function ResultsTable({ results }: ResultsTableProps) {
           r.mfdsItemName.toLowerCase().includes(q)
       );
     }
-    list.sort((a, b) => {
+    list = [...list].sort((a, b) => {
       let av: string | number = '';
       let bv: string | number = '';
       if (sortKey === 'genericCount') {
-        av = a.genericCount;
-        bv = b.genericCount;
+        av = a.genericCount; bv = b.genericCount;
       } else {
         av = (a[sortKey] || '').toLowerCase();
         bv = (b[sortKey] || '').toLowerCase();
@@ -43,38 +42,23 @@ export default function ResultsTable({ results }: ResultsTableProps) {
       return 0;
     });
     return list;
-  }, [matched, filter, sortKey, sortDir]);
+  }, [results, filter, sortKey, sortDir]);
+
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
+  const paged = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
   const toggleSort = (key: SortKey) => {
-    if (sortKey === key) {
-      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
-    } else {
-      setSortKey(key);
-      setSortDir('asc');
-    }
+    if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    else { setSortKey(key); setSortDir('asc'); }
+    setPage(0);
   };
 
-  const exportToExcel = () => {
-    const data = matched.map((r) => ({
-      Product: r.product,
-      Original: r.originalFlag,
-      'Generic Count': r.genericCount,
-      Ingredient: r.ingredient,
-      'MFDS Product Name': r.mfdsItemName,
-      순번: r.순번,
-    }));
-    const ws = XLSX.utils.json_to_sheet(data);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Results');
-    XLSX.writeFile(wb, 'mfds_results.xlsx');
-  };
-
-  const columns: { key: SortKey; label: string; className?: string }[] = [
-    { key: 'product', label: 'Product' },
-    { key: 'originalFlag', label: 'Original', className: 'w-20 text-center' },
-    { key: 'genericCount', label: 'Generic #', className: 'w-24 text-center' },
-    { key: 'ingredient', label: 'Ingredient' },
-    { key: 'mfdsItemName', label: 'MFDS Product Name' },
+  const columns: { key: SortKey; label: string; cls?: string }[] = [
+    { key: 'product', label: '제품명' },
+    { key: 'originalFlag', label: '오리지널', cls: 'w-20 text-center' },
+    { key: 'genericCount', label: '제네릭 수', cls: 'w-24 text-center' },
+    { key: 'ingredient', label: '성분명' },
+    { key: 'mfdsItemName', label: 'MFDS 제품명' },
   ];
 
   return (
@@ -84,21 +68,12 @@ export default function ResultsTable({ results }: ResultsTableProps) {
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <input
             value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            placeholder="Filter results..."
+            onChange={(e) => { setFilter(e.target.value); setPage(0); }}
+            placeholder="검색..."
             className="w-full rounded-md border border-input bg-card pl-9 pr-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
           />
         </div>
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-muted-foreground">{filtered.length} rows</span>
-          <button
-            onClick={exportToExcel}
-            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
-          >
-            <Download className="h-3.5 w-3.5" />
-            Export
-          </button>
-        </div>
+        <span className="text-sm text-muted-foreground">{filtered.length}건</span>
       </div>
 
       <div className="rounded-lg border border-border overflow-hidden bg-card">
@@ -110,7 +85,7 @@ export default function ResultsTable({ results }: ResultsTableProps) {
                 {columns.map((col) => (
                   <th
                     key={col.key}
-                    className={`px-3 py-2 text-left text-xs font-semibold text-muted-foreground cursor-pointer hover:text-foreground transition-colors ${col.className || ''}`}
+                    className={`px-3 py-2 text-left text-xs font-semibold text-muted-foreground cursor-pointer hover:text-foreground transition-colors ${col.cls || ''}`}
                     onClick={() => toggleSort(col.key)}
                   >
                     <span className="inline-flex items-center gap-1">
@@ -123,34 +98,47 @@ export default function ResultsTable({ results }: ResultsTableProps) {
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {filtered.map((r, i) => (
-                <tr key={i} className="hover:bg-muted/30 transition-colors">
-                  <td className="px-3 py-2 text-xs text-muted-foreground">{i + 1}</td>
-                  <td className="px-3 py-2 font-medium text-foreground">{r.product}</td>
-                  <td className="px-3 py-2 text-center">
+              {paged.map((r, i) => (
+                <tr key={page * PAGE_SIZE + i} className="hover:bg-muted/30 transition-colors">
+                  <td className="px-3 py-1.5 text-xs text-muted-foreground">{page * PAGE_SIZE + i + 1}</td>
+                  <td className="px-3 py-1.5 font-medium text-foreground">{r.product}</td>
+                  <td className="px-3 py-1.5 text-center">
                     {r.originalFlag && (
-                      <span className="inline-block bg-primary/10 text-primary font-bold text-xs px-2 py-0.5 rounded">
-                        O
-                      </span>
+                      <span className="inline-block bg-primary/10 text-primary font-bold text-xs px-2 py-0.5 rounded">O</span>
                     )}
                   </td>
-                  <td className="px-3 py-2 text-center table-cell-mono">{r.genericCount}</td>
-                  <td className="px-3 py-2 text-foreground">{r.ingredient || '—'}</td>
-                  <td className="px-3 py-2 text-muted-foreground text-xs">{r.mfdsItemName}</td>
-                  <td className="px-3 py-2 text-xs text-muted-foreground table-cell-mono">{r.순번}</td>
+                  <td className="px-3 py-1.5 text-center table-cell-mono">{r.genericCount || ''}</td>
+                  <td className="px-3 py-1.5 text-foreground">{r.ingredient || '—'}</td>
+                  <td className="px-3 py-1.5 text-muted-foreground text-xs">
+                    {r.mfdsItemName}
+                    {r.matchQuality === 'FUZZY' && r.mfdsItemName && (
+                      <span className="ml-1 text-warning text-[10px] font-medium">(유사)</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-1.5 text-xs text-muted-foreground table-cell-mono">{r.순번}</td>
                 </tr>
               ))}
-              {filtered.length === 0 && (
-                <tr>
-                  <td colSpan={7} className="px-3 py-8 text-center text-muted-foreground">
-                    No matching results
-                  </td>
-                </tr>
+              {paged.length === 0 && (
+                <tr><td colSpan={7} className="px-3 py-8 text-center text-muted-foreground">결과 없음</td></tr>
               )}
             </tbody>
           </table>
         </div>
       </div>
+
+      {totalPages > 1 && (
+        <div className="flex items-center justify-center gap-2">
+          <button onClick={() => setPage(Math.max(0, page - 1))} disabled={page === 0}
+            className="p-1 rounded border border-border text-muted-foreground hover:text-foreground disabled:opacity-30">
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+          <span className="text-sm text-muted-foreground">{page + 1} / {totalPages}</span>
+          <button onClick={() => setPage(Math.min(totalPages - 1, page + 1))} disabled={page >= totalPages - 1}
+            className="p-1 rounded border border-border text-muted-foreground hover:text-foreground disabled:opacity-30">
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
