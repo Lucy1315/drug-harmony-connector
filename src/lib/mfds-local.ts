@@ -55,6 +55,7 @@ async function loadFromExcel(): Promise<MFDSCandidate[]> {
       permitDate: parsePermitDate(row['허가일']),
       permitNo: String(row['허가번호'] || '').trim(),
       itemSeq: String(row['품목기준코드'] || '').trim(),
+      companyName: String(row['업체명'] || '').trim(),
     });
   }
 
