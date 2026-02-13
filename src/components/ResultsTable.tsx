@@ -1,6 +1,36 @@
 import { useState, useMemo } from 'react';
-import { Search, ArrowUpDown, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, ArrowUpDown, ChevronLeft, ChevronRight, ChevronDown, ChevronUp } from 'lucide-react';
 import type { FinalRow } from '@/lib/drug-matcher';
+
+const COLLAPSE_THRESHOLD = 3;
+
+function MfdsNameCell({ names, fuzzy }: { names: string; fuzzy: boolean }) {
+  const [expanded, setExpanded] = useState(false);
+  if (!names) return <span>—</span>;
+
+  const items = names.split(', ');
+  const needsCollapse = items.length > COLLAPSE_THRESHOLD;
+  const visible = needsCollapse && !expanded ? items.slice(0, COLLAPSE_THRESHOLD) : items;
+
+  return (
+    <div>
+      <div className="space-y-0.5">
+        {visible.map((name, i) => (
+          <div key={i} className="break-words">{name}</div>
+        ))}
+      </div>
+      {needsCollapse && (
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="mt-1 inline-flex items-center gap-0.5 text-primary hover:text-primary/80 text-[10px] font-medium"
+        >
+          {expanded ? <><ChevronUp className="h-3 w-3" /> 접기</> : <><ChevronDown className="h-3 w-3" /> +{items.length - COLLAPSE_THRESHOLD}개 더보기</>}
+        </button>
+      )}
+      {fuzzy && <span className="ml-1 text-warning text-[10px] font-medium">(유사)</span>}
+    </div>
+  );
+}
 
 interface ResultsTableProps {
   results: FinalRow[];
@@ -110,12 +140,7 @@ export default function ResultsTable({ results }: ResultsTableProps) {
                   <td className="px-3 py-1.5 text-center table-cell-mono">{r.genericCount || ''}</td>
                   <td className="px-3 py-1.5 text-foreground">{r.ingredient || '—'}</td>
                   <td className="px-3 py-1.5 text-muted-foreground text-xs max-w-xs">
-                    <div className="max-h-20 overflow-y-auto whitespace-pre-wrap break-words">
-                      {r.mfdsItemName}
-                      {r.matchQuality === 'FUZZY' && r.mfdsItemName && (
-                        <span className="ml-1 text-warning text-[10px] font-medium">(유사)</span>
-                      )}
-                    </div>
+                    <MfdsNameCell names={r.mfdsItemName} fuzzy={r.matchQuality === 'FUZZY'} />
                   </td>
                   <td className="px-3 py-1.5 text-xs text-muted-foreground table-cell-mono">{r.순번}</td>
                 </tr>
