@@ -94,11 +94,11 @@ describe("computeAggregates", () => {
     }];
 
     const agg = computeAggregates(matched, candidates);
-    // "레볼레이드정" and "엘팍정" = 2 unique products
+    // 레볼레이드정 is original (earliest date), 엘팍정 is generic = 1 generic
     const ingr = "ELTROMBOPAG OLAMINE";
     const stats = agg.get(ingr);
     expect(stats).toBeDefined();
-    expect(stats!.genericCount).toBe(2);
+    expect(stats!.genericCount).toBe(1);
   });
 
   it("트라스투주맙: 삼페넷/투젭타/허쥬마 = 3 generics", () => {
@@ -119,8 +119,8 @@ describe("computeAggregates", () => {
     const agg = computeAggregates(matched, candidates);
     const stats = agg.get("트라스투주맙");
     expect(stats).toBeDefined();
-    // 허셉틴, 삼페넷, 투젭타, 허쥬마 = 4 unique product names
-    expect(stats!.genericCount).toBe(4);
+    // 허셉틴 is original (earliest), 삼페넷/투젭타/허쥬마 = 3 generics
+    expect(stats!.genericCount).toBe(3);
   });
 
   it("counts 5 different products as genericCount 5", () => {
@@ -140,6 +140,22 @@ describe("computeAggregates", () => {
     const agg = computeAggregates(matched, candidates);
     const stats = agg.get("TESTDRUG");
     expect(stats).toBeDefined();
-    expect(stats!.genericCount).toBe(5);
+    // A정 is original (earliest), B/C/D/E = 4 generics
+    expect(stats!.genericCount).toBe(4);
+  });
+
+  it("only original product → genericCount 0", () => {
+    const candidates: MFDSCandidate[] = [
+      { mfdsItemName: "유니크정25mg", ingredient: "UniqueDrug 25mg", permitDate: "20100101", permitNo: "1", itemSeq: "1" },
+      { mfdsItemName: "유니크정50mg", ingredient: "UniqueDrug 50mg", permitDate: "20100101", permitNo: "2", itemSeq: "2" },
+    ];
+    const matched: MatchedResult[] = [{
+      type: 'matched', product: "UNIQUE", cleanedKey: "UNIQUE", candidate: candidates[0], matchQuality: 'EXACT',
+    }];
+    const agg = computeAggregates(matched, candidates);
+    const stats = agg.get("UNIQUEDRUG");
+    expect(stats).toBeDefined();
+    // Only one product (유니크정), it's the original → 0 generics
+    expect(stats!.genericCount).toBe(0);
   });
 });
