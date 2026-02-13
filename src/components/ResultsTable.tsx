@@ -109,11 +109,13 @@ export default function ResultsTable({ results }: ResultsTableProps) {
                   </td>
                   <td className="px-3 py-1.5 text-center table-cell-mono">{r.genericCount || ''}</td>
                   <td className="px-3 py-1.5 text-foreground">{r.ingredient || '—'}</td>
-                  <td className="px-3 py-1.5 text-muted-foreground text-xs">
-                    {r.mfdsItemName}
-                    {r.matchQuality === 'FUZZY' && r.mfdsItemName && (
-                      <span className="ml-1 text-warning text-[10px] font-medium">(유사)</span>
-                    )}
+                  <td className="px-3 py-1.5 text-muted-foreground text-xs max-w-xs">
+                    <div className="max-h-20 overflow-y-auto whitespace-pre-wrap break-words">
+                      {r.mfdsItemName}
+                      {r.matchQuality === 'FUZZY' && r.mfdsItemName && (
+                        <span className="ml-1 text-warning text-[10px] font-medium">(유사)</span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-3 py-1.5 text-xs text-muted-foreground table-cell-mono">{r.순번}</td>
                 </tr>
