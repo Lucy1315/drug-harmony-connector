@@ -81,7 +81,7 @@ describe("normalizeDosage for product names", () => {
 });
 
 describe("computeAggregates", () => {
-  it("counts by unique company name (업체명), not by product name or permitNo", () => {
+  it("counts by unique normalized product name (dosage-independent)", () => {
     const candidates: MFDSCandidate[] = [
       { mfdsItemName: "레볼레이드정25밀리그램", ingredient: "Eltrombopag Olamine 25mg", permitDate: "20100312", permitNo: "5114", itemSeq: "1", companyName: "한국노바티스(주)" },
       { mfdsItemName: "레볼레이드정50밀리그램", ingredient: "Eltrombopag Olamine 50mg", permitDate: "20100312", permitNo: "284", itemSeq: "2", companyName: "한국노바티스(주)" },
@@ -90,29 +90,47 @@ describe("computeAggregates", () => {
     ];
 
     const matched: MatchedResult[] = [{
-      type: 'matched',
-      product: "REVOLADE",
-      cleanedKey: "REVOLADE",
-      candidate: candidates[0],
-      matchQuality: 'EXACT',
+      type: 'matched', product: "REVOLADE", cleanedKey: "REVOLADE", candidate: candidates[0], matchQuality: 'EXACT',
     }];
 
     const agg = computeAggregates(matched, candidates);
-    // 한국노바티스 and 에이치케이이노엔 = 2 unique companies
+    // "레볼레이드정" and "엘팍정" = 2 unique products
     const ingr = "ELTROMBOPAG OLAMINE";
     const stats = agg.get(ingr);
     expect(stats).toBeDefined();
     expect(stats!.genericCount).toBe(2);
   });
 
-  it("counts 5 companies as genericCount 5", () => {
+  it("트라스투주맙: 삼페넷/투젭타/허쥬마 = 3 generics", () => {
     const candidates: MFDSCandidate[] = [
-      { mfdsItemName: "A정25mg", ingredient: "TestDrug 25mg", permitDate: "20100101", permitNo: "1", itemSeq: "1", companyName: "회사A" },
-      { mfdsItemName: "A정50mg", ingredient: "TestDrug 50mg", permitDate: "20100101", permitNo: "2", itemSeq: "2", companyName: "회사A" },
-      { mfdsItemName: "B정25mg", ingredient: "TestDrug 25mg", permitDate: "20150101", permitNo: "3", itemSeq: "3", companyName: "회사B" },
-      { mfdsItemName: "C정25mg", ingredient: "TestDrug 25mg", permitDate: "20160101", permitNo: "4", itemSeq: "4", companyName: "회사C" },
-      { mfdsItemName: "D정25mg", ingredient: "TestDrug 25mg", permitDate: "20170101", permitNo: "5", itemSeq: "5", companyName: "회사D" },
-      { mfdsItemName: "E정25mg", ingredient: "TestDrug 25mg", permitDate: "20180101", permitNo: "6", itemSeq: "6", companyName: "회사E" },
+      { mfdsItemName: "허셉틴주150mg", ingredient: "트라스투주맙 150mg", permitDate: "20000101", permitNo: "1", itemSeq: "1" },
+      { mfdsItemName: "허셉틴주440mg", ingredient: "트라스투주맙 440mg", permitDate: "20000101", permitNo: "2", itemSeq: "2" },
+      { mfdsItemName: "삼페넷주150mg", ingredient: "트라스투주맙 150mg", permitDate: "20180101", permitNo: "3", itemSeq: "3" },
+      { mfdsItemName: "삼페넷주420mg", ingredient: "트라스투주맙 420mg", permitDate: "20180101", permitNo: "4", itemSeq: "4" },
+      { mfdsItemName: "투젭타주150mg", ingredient: "트라스투주맙 150mg", permitDate: "20190101", permitNo: "5", itemSeq: "5" },
+      { mfdsItemName: "허쥬마주150mg", ingredient: "트라스투주맙 150mg", permitDate: "20200101", permitNo: "6", itemSeq: "6" },
+      { mfdsItemName: "허쥬마주420mg", ingredient: "트라스투주맙 420mg", permitDate: "20200101", permitNo: "7", itemSeq: "7" },
+    ];
+
+    const matched: MatchedResult[] = [{
+      type: 'matched', product: "HERCEPTIN", cleanedKey: "HERCEPTIN", candidate: candidates[0], matchQuality: 'EXACT',
+    }];
+
+    const agg = computeAggregates(matched, candidates);
+    const stats = agg.get("트라스투주맙");
+    expect(stats).toBeDefined();
+    // 허셉틴, 삼페넷, 투젭타, 허쥬마 = 4 unique product names
+    expect(stats!.genericCount).toBe(4);
+  });
+
+  it("counts 5 different products as genericCount 5", () => {
+    const candidates: MFDSCandidate[] = [
+      { mfdsItemName: "A정25mg", ingredient: "TestDrug 25mg", permitDate: "20100101", permitNo: "1", itemSeq: "1" },
+      { mfdsItemName: "A정50mg", ingredient: "TestDrug 50mg", permitDate: "20100101", permitNo: "2", itemSeq: "2" },
+      { mfdsItemName: "B정25mg", ingredient: "TestDrug 25mg", permitDate: "20150101", permitNo: "3", itemSeq: "3" },
+      { mfdsItemName: "C정25mg", ingredient: "TestDrug 25mg", permitDate: "20160101", permitNo: "4", itemSeq: "4" },
+      { mfdsItemName: "D정25mg", ingredient: "TestDrug 25mg", permitDate: "20170101", permitNo: "5", itemSeq: "5" },
+      { mfdsItemName: "E정25mg", ingredient: "TestDrug 25mg", permitDate: "20180101", permitNo: "6", itemSeq: "6" },
     ];
 
     const matched: MatchedResult[] = [{

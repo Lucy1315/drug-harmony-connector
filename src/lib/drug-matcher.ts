@@ -178,18 +178,18 @@ export function computeAggregates(
   }
 
   // Group by NORMALIZED ingredient
-  // Count unique company names (업체명) per ingredient group
-  // e.g. same company with 25mg and 50mg = 1 count, different companies = separate counts
-  const ingredientMap = new Map<string, { companyNames: Set<string>; minDate: string }>();
+  // Count unique product names (dosage-independent) per ingredient group
+  // e.g. 삼페넷/투젭타/허쥬마 = 3 generics for 트라스투주맙 (regardless of dosage variants)
+  const ingredientMap = new Map<string, { normalizedProductNames: Set<string>; minDate: string }>();
 
   for (const [, c] of masterMap) {
     const ingr = normalizeIngredient(c.ingredient || '');
     if (!ingr) continue;
-    const entry = ingredientMap.get(ingr) || { companyNames: new Set(), minDate: '99999999' };
-    // Count by unique company name (업체명)
-    const company = (c.companyName || '').trim().toUpperCase();
-    if (company) {
-      entry.companyNames.add(company);
+    const entry = ingredientMap.get(ingr) || { normalizedProductNames: new Set(), minDate: '99999999' };
+    // Normalize product name to group dosage variants as one product
+    const normalizedName = normalizeDosage(c.mfdsItemName || '');
+    if (normalizedName) {
+      entry.normalizedProductNames.add(normalizedName);
     }
     const dt = c.permitDate || '99999999';
     if (dt < entry.minDate) entry.minDate = dt;
@@ -198,7 +198,7 @@ export function computeAggregates(
 
   const result = new Map<string, { genericCount: number; minPermitDate: string }>();
   for (const [ingr, data] of ingredientMap) {
-    result.set(ingr, { genericCount: data.companyNames.size, minPermitDate: data.minDate });
+    result.set(ingr, { genericCount: data.normalizedProductNames.size, minPermitDate: data.minDate });
   }
   return result;
 }
