@@ -6,9 +6,6 @@ import ManualMatchDialog from './ManualMatchDialog';
 
 interface UnmatchedSectionProps {
   rows: UnmatchedRow[];
-  supabaseUrl: string;
-  anonKey: string;
-  serviceKey: string;
   onManualMatch: (rowIndex: number, candidate: MFDSCandidate) => void;
 }
 
@@ -20,7 +17,7 @@ const REASON_LABELS: Record<string, string> = {
   API_ERROR: 'API 오류',
 };
 
-export default function UnmatchedSection({ rows, supabaseUrl, anonKey, serviceKey, onManualMatch }: UnmatchedSectionProps) {
+export default function UnmatchedSection({ rows, onManualMatch }: UnmatchedSectionProps) {
   const [dialogRow, setDialogRow] = useState<{ index: number; row: UnmatchedRow } | null>(null);
 
   if (rows.length === 0) return null;
@@ -70,9 +67,6 @@ export default function UnmatchedSection({ rows, supabaseUrl, anonKey, serviceKe
           onClose={() => setDialogRow(null)}
           product={dialogRow.row.product}
           cleanedKey={dialogRow.row.cleanedKey}
-          supabaseUrl={supabaseUrl}
-          anonKey={anonKey}
-          serviceKey={serviceKey}
           onSelect={(candidate) => {
             onManualMatch(dialogRow.index, candidate);
             setDialogRow(null);
