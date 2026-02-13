@@ -79,12 +79,16 @@ export interface UnmatchedRow {
 // e.g. "에타너셉트 25밀리그램" → "에타너셉트", "Etanercept 50mg/mL" → "ETANERCEPT"
 export function normalizeIngredient(s: string): string {
   let n = s.toUpperCase().trim();
-  // Remove parenthetical content like (as ...)
+  // Remove parenthetical content like (as ...), (유전자재조합)
   n = n.replace(/\(.*?\)/g, '');
-  // Remove dosage patterns: numbers with units (mg, ml, g, %, mcg, ug, IU, unit, 밀리그램, etc.)
-  n = n.replace(/[\d.,]+\s*(MG|ML|G|%|MCG|UG|IU|UNIT|UNITS|밀리그램|그램|밀리리터|리터|마이크로그램|단위|국제단위)\b/gi, '');
-  // Remove standalone numbers with / (e.g., 50mg/mL patterns already partially handled)
-  n = n.replace(/[\d.,]+\s*\/\s*[\d.,]*\s*(MG|ML|G|%|MCG|UG|IU|UNIT|UNITS|밀리그램|그램|밀리리터|리터)?\b/gi, '');
+  // Remove compound dosage patterns like 40mg/0.8mL, 20mg/mL
+  n = n.replace(/[\d.,]+\s*(MG|ML|G|MCG|UG|IU|UNIT|UNITS|밀리그램|그램|밀리리터|리터|마이크로그램|단위|국제단위)\s*\/\s*[\d.,]*\s*(MG|ML|G|MCG|UG|IU|UNIT|UNITS|밀리그램|그램|밀리리터|리터|마이크로그램|단위|국제단위)?/gi, '');
+  // Remove dosage patterns: numbers with units
+  n = n.replace(/[\d.,]+\s*(MG|ML|G|MCG|UG|IU|UNIT|UNITS|밀리그램|그램|밀리리터|리터|마이크로그램|단위|국제단위|%)/gi, '');
+  // Remove standalone number/unit ratios like 50/mL
+  n = n.replace(/[\d.,]+\s*\/\s*[\d.,]*\s*(MG|ML|G|MCG|UG|IU|UNIT|UNITS|밀리그램|그램|밀리리터|리터|마이크로그램|단위|국제단위)?/gi, '');
+  // Remove remaining slashes left over
+  n = n.replace(/\s*\/\s*/g, ' ');
   // Remove trailing standalone numbers
   n = n.replace(/\s+[\d.,]+\s*$/g, '');
   // Remove leading standalone numbers
