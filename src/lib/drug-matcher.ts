@@ -168,12 +168,13 @@ export function computeAggregates(
   matchedResults: MatchedResult[],
   allCandidates?: MFDSCandidate[]
 ): Map<string, { genericCount: number; minPermitDate: string }> {
-  // Build master set from ALL candidates, deduplicate by permitNo
+  // Build master set from ALL candidates, deduplicate by itemSeq (품목기준코드, globally unique)
   const masterMap = new Map<string, MFDSCandidate>();
   const candidateSource = allCandidates || matchedResults.map(r => r.candidate);
   for (const c of candidateSource) {
-    if (c.permitNo && !masterMap.has(c.permitNo)) {
-      masterMap.set(c.permitNo, c);
+    const key = c.itemSeq || c.permitNo || '';
+    if (key && !masterMap.has(key)) {
+      masterMap.set(key, c);
     }
   }
 
