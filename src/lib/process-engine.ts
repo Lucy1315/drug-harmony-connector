@@ -109,7 +109,7 @@ export function getUniqueKeys(products: { product: string }[]): {
   return { cleanedKeys, uniqueKeys, engKeys };
 }
 
-export async function processProducts(opts: ProcessOptions): Promise<ProcessResult[]> {
+export async function processProducts(opts: ProcessOptions): Promise<{ results: ProcessResult[]; allCandidates: MFDSCandidate[] }> {
   const { supabaseUrl, anonKey, serviceKey, products, onProgress, confirmedTranslations } = opts;
 
   // Build cleaned keys and dedup
@@ -161,6 +161,13 @@ export async function processProducts(opts: ProcessOptions): Promise<ProcessResu
     if (running.length > 0) {
       await Promise.race(running);
     }
+  }
+
+  // Collect ALL candidates from all queries for aggregation
+  const allCandidates: MFDSCandidate[] = [];
+  for (const cached of cache.values()) {
+    if (cached instanceof Error) continue;
+    if (cached) allCandidates.push(...cached);
   }
 
   // Map results back to input rows
@@ -221,5 +228,5 @@ export async function processProducts(opts: ProcessOptions): Promise<ProcessResu
     };
   });
 
-  return results;
+  return { results, allCandidates };
 }
