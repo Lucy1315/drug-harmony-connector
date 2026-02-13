@@ -182,6 +182,19 @@ export function buildFinalRows(
   const allMatched = results.filter((r): r is MatchedResult => r.type === 'matched');
   const aggregates = computeAggregates(allMatched, allCandidates);
 
+  // Build ingredient → all unique MFDS product names map from all candidates
+  const ingredientProductNames = new Map<string, Set<string>>();
+  if (allCandidates) {
+    for (const c of allCandidates) {
+      const ingr = (c.ingredient || '').toUpperCase().trim();
+      if (!ingr || !c.mfdsItemName) continue;
+      if (!ingredientProductNames.has(ingr)) {
+        ingredientProductNames.set(ingr, new Set());
+      }
+      ingredientProductNames.get(ingr)!.add(c.mfdsItemName);
+    }
+  }
+
   const matched: FinalRow[] = [];
   const unmatched: UnmatchedRow[] = [];
 
@@ -215,12 +228,18 @@ export function buildFinalRows(
     const myDate = r.candidate.permitDate || '99999999';
     const originalFlag = stats && myDate === stats.minPermitDate ? 'O' : '';
 
+    // Get all product names with the same ingredient
+    const allNames = ingredientProductNames.get(ingr);
+    const mfdsItemName = allNames && allNames.size > 0
+      ? [...allNames].join(', ')
+      : r.candidate.mfdsItemName || '';
+
     matched.push({
       product: r.product,
       originalFlag,
       genericCount: ingr ? genericCount : 0,
       ingredient: r.candidate.ingredient || '',
-      mfdsItemName: r.candidate.mfdsItemName || '',
+      mfdsItemName,
       순번,
       matchQuality: r.matchQuality,
     });
