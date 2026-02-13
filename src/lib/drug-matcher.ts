@@ -181,27 +181,39 @@ export function computeAggregates(
   }
 
   // Group by NORMALIZED ingredient
-  // Count unique product names (dosage-independent) per ingredient group
-  // e.g. 삼페넷/투젭타/허쥬마 = 3 generics for 트라스투주맙 (regardless of dosage variants)
-  const ingredientMap = new Map<string, { normalizedProductNames: Set<string>; minDate: string }>();
+  // First pass: find all product names and earliest permit date per ingredient
+  const ingredientMap = new Map<string, { normalizedProductNames: Map<string, string>; minDate: string }>();
 
   for (const [, c] of masterMap) {
     const ingr = normalizeIngredient(c.ingredient || '');
     if (!ingr) continue;
-    const entry = ingredientMap.get(ingr) || { normalizedProductNames: new Set(), minDate: '99999999' };
-    // Normalize product name to group dosage variants as one product
+    const entry = ingredientMap.get(ingr) || { normalizedProductNames: new Map(), minDate: '99999999' };
     const normalizedName = normalizeDosage(c.mfdsItemName || '');
     if (normalizedName) {
-      entry.normalizedProductNames.add(normalizedName);
+      // Track earliest permit date per normalized product name
+      const existingDate = entry.normalizedProductNames.get(normalizedName) || '99999999';
+      const dt = c.permitDate || '99999999';
+      if (dt < existingDate) {
+        entry.normalizedProductNames.set(normalizedName, dt);
+      }
     }
     const dt = c.permitDate || '99999999';
     if (dt < entry.minDate) entry.minDate = dt;
     ingredientMap.set(ingr, entry);
   }
 
+  // Second pass: count generics = total unique product names MINUS original product names
+  // Original = product(s) with the earliest permit date for that ingredient
   const result = new Map<string, { genericCount: number; minPermitDate: string }>();
   for (const [ingr, data] of ingredientMap) {
-    result.set(ingr, { genericCount: data.normalizedProductNames.size, minPermitDate: data.minDate });
+    const { normalizedProductNames, minDate } = data;
+    // Count how many unique product names are NOT the original (don't have the earliest date)
+    let originalCount = 0;
+    for (const [, productDate] of normalizedProductNames) {
+      if (productDate === minDate) originalCount++;
+    }
+    const genericCount = normalizedProductNames.size - originalCount;
+    result.set(ingr, { genericCount, minPermitDate: minDate });
   }
   return result;
 }
