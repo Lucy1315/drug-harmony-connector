@@ -75,9 +75,10 @@ export interface UnmatchedRow {
   candidatesCount: number;
 }
 
-// Strip dosage/quantity from ingredient to get base ingredient name
+// Strip dosage/quantity from a string (ingredient or product name)
 // e.g. "에타너셉트 25밀리그램" → "에타너셉트", "Etanercept 50mg/mL" → "ETANERCEPT"
-export function normalizeIngredient(s: string): string {
+// Also used to normalize product names: "레볼레이드정25밀리그램" and "레볼레이드정50밀리그램" → same base
+export function normalizeDosage(s: string): string {
   let n = s.toUpperCase().trim();
   // Remove parenthetical content like (as ...), (유전자재조합)
   n = n.replace(/\(.*?\)/g, '');
@@ -96,6 +97,11 @@ export function normalizeIngredient(s: string): string {
   // Collapse spaces and trim
   n = n.replace(/\s+/g, ' ').trim();
   return n;
+}
+
+// Alias for ingredient normalization (backward compat)
+export function normalizeIngredient(s: string): string {
+  return normalizeDosage(s);
 }
 
 // Clean English name for comparison
@@ -171,13 +177,19 @@ export function computeAggregates(
   }
 
   // Group by NORMALIZED ingredient (dosage-independent)
-  const ingredientMap = new Map<string, { permitNos: Set<string>; minDate: string }>();
+  // Count unique products by normalized product name (not by permitNo)
+  // e.g. "레볼레이드정25mg" and "레볼레이드정50mg" = 1 product, not 2
+  const ingredientMap = new Map<string, { normalizedProductNames: Set<string>; minDate: string }>();
 
-  for (const [permitNo, c] of masterMap) {
+  for (const [, c] of masterMap) {
     const ingr = normalizeIngredient(c.ingredient || '');
     if (!ingr) continue;
-    const entry = ingredientMap.get(ingr) || { permitNos: new Set(), minDate: '99999999' };
-    entry.permitNos.add(permitNo);
+    const entry = ingredientMap.get(ingr) || { normalizedProductNames: new Set(), minDate: '99999999' };
+    // Normalize product name to group dosage variants as one product
+    const normalizedName = normalizeDosage(c.mfdsItemName || c.permitNo || '');
+    if (normalizedName) {
+      entry.normalizedProductNames.add(normalizedName);
+    }
     const dt = c.permitDate || '99999999';
     if (dt < entry.minDate) entry.minDate = dt;
     ingredientMap.set(ingr, entry);
@@ -185,7 +197,7 @@ export function computeAggregates(
 
   const result = new Map<string, { genericCount: number; minPermitDate: string }>();
   for (const [ingr, data] of ingredientMap) {
-    result.set(ingr, { genericCount: data.permitNos.size, minPermitDate: data.minDate });
+    result.set(ingr, { genericCount: data.normalizedProductNames.size, minPermitDate: data.minDate });
   }
   return result;
 }

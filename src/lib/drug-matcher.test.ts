@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { normalizeIngredient } from "./drug-matcher";
+import { normalizeIngredient, normalizeDosage, computeAggregates, MFDSCandidate, MatchedResult } from "./drug-matcher";
 
 describe("normalizeIngredient", () => {
   it("removes mg dosage", () => {
@@ -63,5 +63,45 @@ describe("normalizeIngredient", () => {
 
   it("handles empty string", () => {
     expect(normalizeIngredient("")).toBe("");
+  });
+});
+
+describe("normalizeDosage for product names", () => {
+  it("groups dosage variants of same product", () => {
+    const a = normalizeDosage("레볼레이드정25밀리그램(엘트롬보팔올라민)");
+    const b = normalizeDosage("레볼레이드정50밀리그램(엘트롬보팔올라민)");
+    expect(a).toBe(b);
+  });
+
+  it("differentiates different product names", () => {
+    const a = normalizeDosage("레볼레이드정25밀리그램(엘트롬보팔올라민)");
+    const b = normalizeDosage("엘팍정25밀리그램(엘트롬보팔올라민)");
+    expect(a).not.toBe(b);
+  });
+});
+
+describe("computeAggregates", () => {
+  it("counts by unique normalized product name, not by permitNo", () => {
+    const candidates: MFDSCandidate[] = [
+      { mfdsItemName: "레볼레이드정25밀리그램", ingredient: "Eltrombopag Olamine 25mg", permitDate: "20100312", permitNo: "5114", itemSeq: "1" },
+      { mfdsItemName: "레볼레이드정50밀리그램", ingredient: "Eltrombopag Olamine 50mg", permitDate: "20100312", permitNo: "284", itemSeq: "2" },
+      { mfdsItemName: "엘팍정25밀리그램", ingredient: "Eltrombopag Olamine 25mg", permitDate: "20230310", permitNo: "135", itemSeq: "3" },
+      { mfdsItemName: "엘팍정50밀리그램", ingredient: "Eltrombopag Olamine 50mg", permitDate: "20230310", permitNo: "136", itemSeq: "4" },
+    ];
+
+    const matched: MatchedResult[] = [{
+      type: 'matched',
+      product: "REVOLADE",
+      cleanedKey: "REVOLADE",
+      candidate: candidates[0],
+      matchQuality: 'EXACT',
+    }];
+
+    const agg = computeAggregates(matched, candidates);
+    // "레볼레이드정" and "엘팍정" = 2 unique products
+    const ingr = "ELTROMBOPAG OLAMINE";
+    const stats = agg.get(ingr);
+    expect(stats).toBeDefined();
+    expect(stats!.genericCount).toBe(2);
   });
 });
