@@ -6,8 +6,6 @@ import {
   findBestMatch,
   type MFDSCandidate,
   type ProcessResult,
-  type MatchedResult,
-  type UnmatchedResult,
 } from './drug-matcher';
 
 const CONCURRENCY = 4;
@@ -55,6 +53,48 @@ function itemsToCandidates(items: MFDSItem[]): MFDSCandidate[] {
   }));
 }
 
+function isEnglishKey(key: string): boolean {
+  return !/[\uAC00-\uD7AF]/.test(key);
+}
+
+/** Translate English drug names to Korean via AI edge function */
+async function translateEngToKor(
+  supabaseUrl: string,
+  anonKey: string,
+  engNames: string[]
+): Promise<Map<string, string>> {
+  const result = new Map<string, string>();
+  if (engNames.length === 0) return result;
+
+  try {
+    const url = `${supabaseUrl}/functions/v1/translate-drug-names`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': anonKey },
+      body: JSON.stringify({ names: engNames }),
+    });
+
+    if (!response.ok) {
+      console.warn('Translation API failed:', response.status);
+      return result;
+    }
+
+    const data = await response.json();
+    const translations: { eng: string; kor: string }[] = data.translations || [];
+    for (const t of translations) {
+      const engUpper = t.eng.toUpperCase().trim();
+      const kor = t.kor.trim();
+      // Only use translation if it's actually Korean
+      if (/[\uAC00-\uD7AF]/.test(kor)) {
+        result.set(engUpper, kor);
+      }
+    }
+  } catch (err) {
+    console.warn('Translation failed:', err);
+  }
+  return result;
+}
+
 export async function processProducts(opts: ProcessOptions): Promise<ProcessResult[]> {
   const { supabaseUrl, anonKey, serviceKey, products, onProgress } = opts;
 
@@ -62,21 +102,41 @@ export async function processProducts(opts: ProcessOptions): Promise<ProcessResu
   const cleanedKeys = products.map((p) => cleanProduct(p.product));
   const uniqueKeys = [...new Set(cleanedKeys)];
 
+  // Separate English and Korean keys
+  const engKeys = uniqueKeys.filter(isEnglishKey);
+  const korKeys = uniqueKeys.filter((k) => !isEnglishKey(k));
+
+  // Step 1: Translate English drug names to Korean
+  const translations = await translateEngToKor(supabaseUrl, anonKey, engKeys);
+  console.log(`Translated ${translations.size}/${engKeys.length} English names to Korean`);
+
+  // Build search map: cleanedKey -> searchTerm (translated or original)
+  const searchMap = new Map<string, string>();
+  for (const key of uniqueKeys) {
+    if (isEnglishKey(key)) {
+      searchMap.set(key, translations.get(key) || key);
+    } else {
+      searchMap.set(key, key);
+    }
+  }
+
   // Cache: cleanedKey -> candidates | error
   const cache = new Map<string, MFDSCandidate[] | Error>();
 
   // Process unique keys with concurrency
   let completed = 0;
+  const totalKeys = uniqueKeys.length;
 
   async function processKey(key: string) {
+    const searchTerm = searchMap.get(key) || key;
     try {
-      const items = await fetchWithRetry(supabaseUrl, anonKey, serviceKey, key);
+      const items = await fetchWithRetry(supabaseUrl, anonKey, serviceKey, searchTerm);
       cache.set(key, itemsToCandidates(items));
     } catch (err) {
       cache.set(key, err instanceof Error ? err : new Error(String(err)));
     }
     completed++;
-    onProgress(completed, uniqueKeys.length);
+    onProgress(completed, totalKeys);
   }
 
   // Run with concurrency limit
@@ -124,14 +184,13 @@ export async function processProducts(opts: ProcessOptions): Promise<ProcessResu
     }
 
     const candidates = cached || [];
-    const isEnglish = !/[\uAC00-\uD7AF]/.test(key);
 
     if (candidates.length === 0) {
       return {
         type: 'unmatched' as const,
         product: row.product,
         cleanedKey: key,
-        reason: isEnglish ? 'NO_RESULT_ENG' as const : 'NO_RESULT' as const,
+        reason: isEnglishKey(key) ? 'NO_RESULT_ENG' as const : 'NO_RESULT' as const,
         candidatesCount: 0,
       };
     }
@@ -144,17 +203,6 @@ export async function processProducts(opts: ProcessOptions): Promise<ProcessResu
         cleanedKey: key,
         reason: 'AMBIGUOUS' as const,
         candidatesCount: candidates.length,
-      };
-    }
-
-    if (!match.candidate.ingredient) {
-      // Still matched but no ingredient
-      return {
-        type: 'matched' as const,
-        product: row.product,
-        cleanedKey: key,
-        candidate: match.candidate,
-        matchQuality: match.quality,
       };
     }
 
