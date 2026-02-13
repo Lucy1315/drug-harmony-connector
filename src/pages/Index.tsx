@@ -1,160 +1,227 @@
 import { useState, useCallback } from 'react';
-import { Pill, Loader2 } from 'lucide-react';
-import FileUpload from '@/components/FileUpload';
-import ApiKeyInput from '@/components/ApiKeyInput';
+import { Pill, Loader2, Download, Key, Eye, EyeOff, FileText, AlertTriangle, CheckCircle2, Beaker, Layers } from 'lucide-react';
+import * as XLSX from 'xlsx';
+import FileUpload, { type InputRow } from '@/components/FileUpload';
 import ResultsTable from '@/components/ResultsTable';
 import UnmatchedSection from '@/components/UnmatchedSection';
 import ProgressBar from '@/components/ProgressBar';
-import { cleanProductName, findBestMatch, computeAggregates, type MatchResult, type MFDSProduct } from '@/lib/drug-matcher';
-import { queryMFDS } from '@/lib/mfds-api';
+import { buildFinalRows, type FinalRow, type UnmatchedRow } from '@/lib/drug-matcher';
+import { processProducts } from '@/lib/process-engine';
+
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
+const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
 
 const Index = () => {
   const [apiKey, setApiKey] = useState('');
-  const [products, setProducts] = useState<string[]>([]);
-  const [results, setResults] = useState<MatchResult[]>([]);
+  const [showKey, setShowKey] = useState(false);
+  const [inputRows, setInputRows] = useState<InputRow[]>([]);
+  const [matched, setMatched] = useState<FinalRow[]>([]);
+  const [unmatched, setUnmatched] = useState<UnmatchedRow[]>([]);
   const [processing, setProcessing] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0 });
+  const [activeTab, setActiveTab] = useState<'results' | 'unmatched'>('results');
+  const [done, setDone] = useState(false);
 
   const handleProcess = useCallback(async () => {
-    if (!apiKey.trim() || products.length === 0) return;
+    if (!apiKey.trim() || inputRows.length === 0) return;
     setProcessing(true);
-    setResults([]);
-    setProgress({ current: 0, total: products.length });
+    setDone(false);
+    setMatched([]);
+    setUnmatched([]);
+    setActiveTab('results');
 
-    const rawResults: MatchResult[] = [];
+    const results = await processProducts({
+      supabaseUrl: SUPABASE_URL,
+      anonKey: SUPABASE_KEY,
+      serviceKey: apiKey.trim(),
+      products: inputRows,
+      onProgress: (current, total) => setProgress({ current, total }),
+    });
 
-    for (let i = 0; i < products.length; i++) {
-      const product = products[i];
-      const cleanedKey = cleanProductName(product);
-
-      let result: MatchResult = {
-        product,
-        cleanedKey,
-        matched: false,
-        ingredient: '',
-        originalFlag: '',
-        genericCount: 0,
-        mfdsItemName: '',
-        순번: '',
-      };
-
-      try {
-        if (!cleanedKey) {
-          result.unmatchedReason = 'Empty after cleaning';
-          rawResults.push(result);
-          setProgress({ current: i + 1, total: products.length });
-          continue;
-        }
-
-        const { items } = await queryMFDS(apiKey, cleanedKey);
-
-        if (items.length === 0) {
-          result.unmatchedReason = 'No API results';
-          rawResults.push(result);
-          setProgress({ current: i + 1, total: products.length });
-          continue;
-        }
-
-        const candidates: MFDSProduct[] = items.map((item) => ({
-          ITEM_NAME: item.ITEM_NAME || '',
-          PRDUCT_PRMISN_NO: item.PRDUCT_PRMISN_NO || '',
-          PRMSN_DT: item.PRMSN_DT || '',
-          ITEM_INGR_NAME: item.ITEM_INGR_NAME || '',
-          순번: item.ITEM_SEQ || '',
-        }));
-
-        const best = findBestMatch(cleanedKey, candidates);
-
-        if (best) {
-          result = {
-            ...result,
-            matched: true,
-            mfdsProduct: best,
-            ingredient: best.ITEM_INGR_NAME || '',
-            mfdsItemName: best.ITEM_NAME || '',
-            순번: best.순번 || '',
-          };
-        } else {
-          result.unmatchedReason = 'No suitable match in results';
-        }
-      } catch (err) {
-        result.unmatchedReason = `API error: ${err instanceof Error ? err.message : 'Unknown'}`;
-      }
-
-      rawResults.push(result);
-      setProgress({ current: i + 1, total: products.length });
-    }
-
-    const aggregated = computeAggregates(rawResults);
-    setResults(aggregated);
+    const { matched: m, unmatched: u } = buildFinalRows(results, inputRows);
+    setMatched(m);
+    setUnmatched(u);
     setProcessing(false);
-  }, [apiKey, products]);
+    setDone(true);
+  }, [apiKey, inputRows]);
 
-  const canProcess = apiKey.trim().length > 0 && products.length > 0 && !processing;
+  const exportExcel = (type: 'results' | 'unmatched') => {
+    if (type === 'results') {
+      const data = matched.map((r) => ({
+        '제품명': r.product,
+        '식약처 오리지널 품목허가': r.originalFlag,
+        '제네릭 수 (개)': r.genericCount || '',
+        '성분명': r.ingredient,
+        'MFDS 제품명': r.mfdsItemName,
+        '순번': r.순번,
+      }));
+      const ws = XLSX.utils.json_to_sheet(data);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, '결과');
+      XLSX.writeFile(wb, '식약처_분석결과.xlsx');
+    } else {
+      const data = unmatched.map((r) => ({
+        '순번': r.순번,
+        '제품명': r.product,
+        '검색 키': r.cleanedKey,
+        '사유': r.reason,
+        '후보 수': r.candidatesCount,
+      }));
+      const ws = XLSX.utils.json_to_sheet(data);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, '매칭실패');
+      XLSX.writeFile(wb, '매칭실패_목록.xlsx');
+    }
+  };
+
+  const canProcess = apiKey.trim().length > 0 && inputRows.length > 0 && !processing;
+  const matchedCount = done ? matched.filter((r) => r.ingredient).length : 0;
+  const unmatchedCount = done ? unmatched.length : 0;
+  const uniqueIngredients = done ? new Set(matched.map((r) => r.ingredient).filter(Boolean)).size : 0;
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b border-border bg-card">
-        <div className="max-w-6xl mx-auto px-4 py-4 flex items-center gap-3">
-          <div className="h-9 w-9 rounded-lg bg-primary flex items-center justify-center">
-            <Pill className="h-5 w-5 text-primary-foreground" />
-          </div>
-          <div>
-            <h1 className="text-lg font-bold text-foreground tracking-tight">MFDS Drug Standardizer</h1>
-            <p className="text-xs text-muted-foreground">Match product names to MFDS registry</p>
-          </div>
+    <div className="min-h-screen bg-background flex flex-col">
+      {/* Top bar */}
+      <header className="border-b border-border bg-card px-4 py-3 flex items-center gap-3 flex-shrink-0">
+        <div className="h-8 w-8 rounded-lg bg-primary flex items-center justify-center">
+          <Pill className="h-4 w-4 text-primary-foreground" />
         </div>
+        <h1 className="text-base font-bold text-foreground tracking-tight">한국 식약처 의약품 품목허가 현황 분석</h1>
       </header>
 
-      <main className="max-w-6xl mx-auto px-4 py-6 space-y-6">
-        {/* Setup section */}
-        <div className="grid md:grid-cols-2 gap-4">
-          <div className="space-y-4">
-            <ApiKeyInput value={apiKey} onChange={setApiKey} disabled={processing} />
+      <div className="flex flex-1 overflow-hidden">
+        {/* Left panel */}
+        <aside className="w-72 border-r border-border bg-card p-4 space-y-4 flex-shrink-0 overflow-y-auto">
+          {/* API Key */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
+              <Key className="h-3 w-3" /> MFDS API 키
+            </label>
+            <div className="relative">
+              <input
+                type={showKey ? 'text' : 'password'}
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder="서비스 키 입력..."
+                disabled={processing}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 pr-8 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+              />
+              <button type="button" onClick={() => setShowKey(!showKey)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                {showKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+              </button>
+            </div>
+            <p className="text-[10px] text-muted-foreground">세션 중에만 사용되며 저장되지 않습니다.</p>
           </div>
-          <FileUpload
-            onDataLoaded={setProducts}
-            disabled={processing}
-          />
-        </div>
 
-        {/* Status & action */}
-        {products.length > 0 && (
-          <div className="flex items-center justify-between bg-card rounded-lg border border-border px-4 py-3">
-            <p className="text-sm text-foreground">
-              <span className="font-medium">{products.length}</span> products loaded
-            </p>
-            <button
-              onClick={handleProcess}
-              disabled={!canProcess}
-              className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {processing && <Loader2 className="h-4 w-4 animate-spin" />}
-              {processing ? 'Processing...' : 'Standardize'}
-            </button>
+          {/* File upload */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
+              <FileText className="h-3 w-3" /> 파일 업로드
+            </label>
+            <FileUpload onDataLoaded={setInputRows} disabled={processing} />
+            {inputRows.length > 0 && (
+              <p className="text-xs text-muted-foreground">{inputRows.length}개 제품 로드됨</p>
+            )}
           </div>
-        )}
 
-        {/* Progress */}
-        {processing && (
-          <ProgressBar
-            current={progress.current}
-            total={progress.total}
-            label="Querying MFDS API..."
-          />
-        )}
+          {/* Action button */}
+          <button
+            onClick={handleProcess}
+            disabled={!canProcess}
+            className="w-full inline-flex items-center justify-center gap-2 rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {processing && <Loader2 className="h-4 w-4 animate-spin" />}
+            {processing ? '처리 중...' : '분석 실행'}
+          </button>
 
-        {/* Results */}
-        {results.length > 0 && !processing && (
-          <>
-            <ResultsTable results={results} />
-            <UnmatchedSection results={results} />
-          </>
-        )}
-      </main>
+          {/* Progress */}
+          {processing && (
+            <ProgressBar
+              current={progress.current}
+              total={progress.total}
+              label={`처리 중: ${progress.current} / ${progress.total}`}
+            />
+          )}
+        </aside>
+
+        {/* Main area */}
+        <main className="flex-1 overflow-y-auto p-4 space-y-4">
+          {!done && !processing && (
+            <div className="flex items-center justify-center h-full">
+              <div className="text-center text-muted-foreground space-y-2">
+                <Beaker className="h-12 w-12 mx-auto opacity-30" />
+                <p className="text-sm">엑셀 파일과 API 키를 입력한 후 분석을 실행하세요.</p>
+              </div>
+            </div>
+          )}
+
+          {done && (
+            <>
+              {/* Summary cards */}
+              <div className="grid grid-cols-4 gap-3">
+                <SummaryCard icon={<Layers className="h-4 w-4" />} label="총 입력 제품 수" value={inputRows.length} />
+                <SummaryCard icon={<CheckCircle2 className="h-4 w-4 text-success" />} label="매칭 성공" value={matchedCount} color="text-success" />
+                <SummaryCard icon={<AlertTriangle className="h-4 w-4 text-warning" />} label="매칭 실패" value={unmatchedCount} color="text-warning" />
+                <SummaryCard icon={<Beaker className="h-4 w-4 text-primary" />} label="고유 성분 수" value={uniqueIngredients} color="text-primary" />
+              </div>
+
+              {/* Tabs */}
+              <div className="flex items-center gap-1 border-b border-border">
+                <TabButton active={activeTab === 'results'} onClick={() => setActiveTab('results')}>
+                  결과 ({matched.length})
+                </TabButton>
+                <TabButton active={activeTab === 'unmatched'} onClick={() => setActiveTab('unmatched')}>
+                  매칭 실패 ({unmatched.length})
+                </TabButton>
+                <div className="flex-1" />
+                {activeTab === 'results' && (
+                  <button onClick={() => exportExcel('results')}
+                    className="inline-flex items-center gap-1.5 rounded-md bg-primary/10 text-primary px-3 py-1.5 text-xs font-medium hover:bg-primary/20 transition-colors mb-1">
+                    <Download className="h-3 w-3" /> 엑셀 다운로드
+                  </button>
+                )}
+                {activeTab === 'unmatched' && unmatched.length > 0 && (
+                  <button onClick={() => exportExcel('unmatched')}
+                    className="inline-flex items-center gap-1.5 rounded-md bg-warning/10 text-warning px-3 py-1.5 text-xs font-medium hover:bg-warning/20 transition-colors mb-1">
+                    <Download className="h-3 w-3" /> 매칭 실패 다운로드
+                  </button>
+                )}
+              </div>
+
+              {activeTab === 'results' && <ResultsTable results={matched} />}
+              {activeTab === 'unmatched' && <UnmatchedSection rows={unmatched} />}
+            </>
+          )}
+        </main>
+      </div>
     </div>
   );
 };
+
+function SummaryCard({ icon, label, value, color }: { icon: React.ReactNode; label: string; value: number; color?: string }) {
+  return (
+    <div className="rounded-lg border border-border bg-card p-3">
+      <div className="flex items-center gap-2 mb-1">
+        {icon}
+        <span className="text-xs text-muted-foreground">{label}</span>
+      </div>
+      <p className={`text-2xl font-bold ${color || 'text-foreground'}`}>{value}</p>
+    </div>
+  );
+}
+
+function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${
+        active ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
 
 export default Index;
