@@ -58,7 +58,7 @@ const Index = () => {
     setUnmatched([]);
     setActiveTab('results');
 
-    const results = await processProducts({
+    const { results, allCandidates } = await processProducts({
       supabaseUrl: SUPABASE_URL,
       anonKey: SUPABASE_KEY,
       serviceKey: apiKey.trim(),
@@ -67,7 +67,7 @@ const Index = () => {
       confirmedTranslations,
     });
 
-    const { matched: m, unmatched: u } = buildFinalRows(results, inputRows);
+    const { matched: m, unmatched: u } = buildFinalRows(results, inputRows, allCandidates);
     setMatched(m);
     setUnmatched(u);
     setPhase('done');

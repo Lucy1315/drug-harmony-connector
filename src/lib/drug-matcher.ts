@@ -134,13 +134,22 @@ export function findBestMatch(
 }
 
 export function computeAggregates(
-  matchedResults: MatchedResult[]
+  matchedResults: MatchedResult[],
+  allCandidates?: MFDSCandidate[]
 ): Map<string, { genericCount: number; minPermitDate: string }> {
-  // Build master set: deduplicate by permitNo
-  const masterMap = new Map<string, MFDSCandidate>();
+  // Collect all unique ingredients from matched results
+  const matchedIngredients = new Set<string>();
   for (const r of matchedResults) {
-    if (r.candidate.permitNo && !masterMap.has(r.candidate.permitNo)) {
-      masterMap.set(r.candidate.permitNo, r.candidate);
+    const ingr = (r.candidate.ingredient || '').toUpperCase().trim();
+    if (ingr) matchedIngredients.add(ingr);
+  }
+
+  // Build master set from ALL candidates (not just matched), deduplicate by permitNo
+  const masterMap = new Map<string, MFDSCandidate>();
+  const candidateSource = allCandidates || matchedResults.map(r => r.candidate);
+  for (const c of candidateSource) {
+    if (c.permitNo && !masterMap.has(c.permitNo)) {
+      masterMap.set(c.permitNo, c);
     }
   }
 
@@ -166,11 +175,12 @@ export function computeAggregates(
 
 export function buildFinalRows(
   results: ProcessResult[],
-  inputRows: { product: string; 순번?: string }[]
+  inputRows: { product: string; 순번?: string }[],
+  allCandidates?: MFDSCandidate[]
 ): { matched: FinalRow[]; unmatched: UnmatchedRow[] } {
   // Gather all matched for aggregation
   const allMatched = results.filter((r): r is MatchedResult => r.type === 'matched');
-  const aggregates = computeAggregates(allMatched);
+  const aggregates = computeAggregates(allMatched, allCandidates);
 
   const matched: FinalRow[] = [];
   const unmatched: UnmatchedRow[] = [];
