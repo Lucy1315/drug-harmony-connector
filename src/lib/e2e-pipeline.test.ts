@@ -151,37 +151,57 @@ describe("E2E: Generic count verification with real MFDS data", () => {
     expect(row.genericCount).toBeGreaterThanOrEqual(5);
   });
 
-  it("Pemetrexed ingredient grouping: deep diagnosis", () => {
-    const pemetrexedRecords = allCandidates.filter(c =>
-      (c.ingredientEng || '').toUpperCase().includes('PEMETREXED') ||
-      (c.ingredient || '').includes('페메트렉시드')
+  it("ZOMETA(Zoledronic Acid): diagnose generic count", () => {
+    // Check all Zoledronic records
+    const zolRecords = allCandidates.filter(c =>
+      (c.ingredientEng || '').toUpperCase().includes('ZOLEDRONIC') ||
+      (c.ingredient || '').includes('졸레드론')
     );
-
-    console.log(`\nPemetrexed records: ${pemetrexedRecords.length}`);
-    
-    // Check what group key each record gets
+    console.log(`\nZoledronic records: ${zolRecords.length}`);
     const groupKeys = new Map<string, string[]>();
-    for (const c of pemetrexedRecords) {
+    for (const c of zolRecords) {
       const key = getIngredientGroupKey(c);
       const names = groupKeys.get(key) || [];
-      names.push(`${normalizeDosage(c.mfdsItemName)} [itemSeq=${c.itemSeq}, date=${c.permitDate}, ingrEng="${c.ingredientEng}"]`);
+      names.push(`${normalizeDosage(c.mfdsItemName)} [ingrEng="${c.ingredientEng}", ingrKor="${c.ingredient}", date=${c.permitDate}]`);
       groupKeys.set(key, names);
     }
-    console.log(`Group keys for Pemetrexed records:`);
     for (const [key, names] of groupKeys) {
       console.log(`  Key: "${key}" → ${names.length} records`);
-      for (const n of names.slice(0, 3)) console.log(`    ${n}`);
-      if (names.length > 3) console.log(`    ... and ${names.length - 3} more`);
+      for (const n of names.slice(0, 5)) console.log(`    ${n}`);
+      if (names.length > 5) console.log(`    ... and ${names.length - 5} more`);
     }
 
-    // Check itemSeq uniqueness
-    const seqs = pemetrexedRecords.map(c => c.itemSeq);
-    const uniqueSeqs = new Set(seqs.filter(s => s));
-    const emptySeqs = seqs.filter(s => !s).length;
-    console.log(`itemSeq: ${uniqueSeqs.size} unique, ${emptySeqs} empty`);
-
-    expect(pemetrexedRecords.length).toBeGreaterThan(0);
+    const { matched } = simulateProcess(["조메타주"], allCandidates);
+    const row = matched[0];
+    console.log(`ZOMETA: flag=${row.originalFlag}, generics=${row.genericCount}, ingr=${row.ingredientEng}`);
+    expect(row.originalFlag).toBe("O");
+    expect(row.genericCount).toBeGreaterThanOrEqual(3);
   }, 30000);
+
+  it("Comprehensive: verify multiple drugs have reasonable generic counts", () => {
+    const drugs = [
+      { name: "알림타주", minGenerics: 5, label: "ALIMTA/Pemetrexed" },
+      { name: "글리벡정", minGenerics: 5, label: "GLIVEC/Imatinib" },
+      { name: "시알리스정", minGenerics: 5, label: "CIALIS/Tadalafil" },
+      { name: "조메타주", minGenerics: 3, label: "ZOMETA/Zoledronic Acid" },
+      { name: "허셉틴주", minGenerics: 1, label: "HERCEPTIN/Trastuzumab" },
+      { name: "넥사바정", minGenerics: 1, label: "NEXAVAR/Sorafenib" },
+      { name: "타쎄바정", minGenerics: 1, label: "TARCEVA/Erlotinib" },
+    ];
+
+    console.log("\n=== Comprehensive Generic Count Verification ===");
+    console.log("Drug | Flag | Generics | Ingredient");
+    console.log("-".repeat(70));
+
+    for (const drug of drugs) {
+      const { matched } = simulateProcess([drug.name], allCandidates);
+      const row = matched[0];
+      const status = row.genericCount >= drug.minGenerics ? "✓" : "✗";
+      console.log(`${status} ${drug.label}: ${row.originalFlag} | ${row.genericCount} (min ${drug.minGenerics}) | ${row.ingredientEng || row.ingredient || "N/A"}`);
+      expect(row.originalFlag).toBe("O");
+      expect(row.genericCount).toBeGreaterThanOrEqual(drug.minGenerics);
+    }
+  }, 60000);
 
   it("processes Korean drug names with correct O/X flags", () => {
     const testCases = ["허셉틴주", "삼페넷주", "캐싸일라주", "허쥬마주"];
