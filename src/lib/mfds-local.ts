@@ -51,12 +51,25 @@ function findNewDrugField(row: any): boolean {
   return false;
 }
 
+const BLOCKED_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+/** Sanitize parsed rows to prevent prototype pollution from crafted spreadsheet headers */
+function sanitizeRow(row: Record<string, any>): Record<string, any> {
+  const clean: Record<string, any> = {};
+  for (const key of Object.keys(row)) {
+    if (!BLOCKED_KEYS.has(key)) {
+      clean[key] = row[key];
+    }
+  }
+  return clean;
+}
+
 async function loadFromExcel(): Promise<MFDSCandidate[]> {
   const response = await fetch('/data/mfds-data.xlsx');
   const buffer = await response.arrayBuffer();
   const wb = XLSX.read(buffer, { type: 'array' });
   const ws = wb.Sheets[wb.SheetNames[0]];
-  const rows = XLSX.utils.sheet_to_json<any>(ws);
+  const rows = XLSX.utils.sheet_to_json<any>(ws).map(sanitizeRow);
 
   const candidates: MFDSCandidate[] = [];
   for (const row of rows) {

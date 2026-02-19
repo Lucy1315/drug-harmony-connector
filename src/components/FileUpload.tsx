@@ -12,11 +12,33 @@ interface FileUploadProps {
   disabled?: boolean;
 }
 
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
+const BLOCKED_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+/** Sanitize parsed rows to prevent prototype pollution from crafted spreadsheet headers */
+function sanitizeRows(rows: Record<string, any>[]): Record<string, any>[] {
+  return rows.map((row) => {
+    const clean: Record<string, any> = {};
+    for (const key of Object.keys(row)) {
+      if (!BLOCKED_KEYS.has(key)) {
+        clean[key] = row[key];
+      }
+    }
+    return clean;
+  });
+}
+
 export default function FileUpload({ onDataLoaded, disabled }: FileUploadProps) {
   const [dragOver, setDragOver] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const processFile = useCallback((file: File) => {
+    setError(null);
+    if (file.size > MAX_FILE_SIZE) {
+      setError(`파일 크기가 너무 큽니다 (최대 ${MAX_FILE_SIZE / 1024 / 1024}MB)`);
+      return;
+    }
     setFileName(file.name);
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -24,7 +46,7 @@ export default function FileUpload({ onDataLoaded, disabled }: FileUploadProps) 
       if (!data) return;
       const workbook = XLSX.read(data, { type: 'array' });
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      const rawRows: Record<string, any>[] = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+      const rawRows = sanitizeRows(XLSX.utils.sheet_to_json<Record<string, any>>(sheet, { defval: '' }));
 
       if (rawRows.length === 0) return;
 
@@ -84,6 +106,9 @@ export default function FileUpload({ onDataLoaded, disabled }: FileUploadProps) 
         input.click();
       }}
     >
+      {error && (
+        <p className="text-destructive text-xs mb-2">{error}</p>
+      )}
       {fileName ? (
         <div className="flex items-center gap-3">
           <FileSpreadsheet className="h-6 w-6 text-primary flex-shrink-0" />
