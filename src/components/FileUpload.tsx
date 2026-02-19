@@ -12,7 +12,6 @@ interface FileUploadProps {
   disabled?: boolean;
 }
 
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 const BLOCKED_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
 /** Sanitize parsed rows to prevent prototype pollution from crafted spreadsheet headers */
@@ -35,10 +34,6 @@ export default function FileUpload({ onDataLoaded, disabled }: FileUploadProps) 
 
   const processFile = useCallback((file: File) => {
     setError(null);
-    if (file.size > MAX_FILE_SIZE) {
-      setError(`파일 크기가 너무 큽니다 (최대 ${MAX_FILE_SIZE / 1024 / 1024}MB)`);
-      return;
-    }
     setFileName(file.name);
     const reader = new FileReader();
     reader.onload = (e) => {
