@@ -65,14 +65,32 @@ function loadMFDSData(): MFDSCandidate[] {
   return candidates;
 }
 
+const KOR_DOSAGE_FORMS = ['필름코팅정', '서방정', '장용정', '츄어블정', '분산정', '구강붕해정', '정', '주사액', '주사', '주', '캡슐', '시럽', '현탁액', '액', '산', '연고', '크림', '패치', '점안액', '점비액'];
+
+function stripDosageForm(name: string): string {
+  const upper = name.toUpperCase().trim();
+  for (const form of KOR_DOSAGE_FORMS) {
+    const fu = form.toUpperCase();
+    if (upper.endsWith(fu) && upper.length > fu.length) return upper.slice(0, -fu.length);
+  }
+  return upper;
+}
+
 function searchLocal(query: string, data: MFDSCandidate[]): MFDSCandidate[] {
   const q = query.toUpperCase().trim();
   if (!q) return [];
   const isKorean = /[\uAC00-\uD7AF]/.test(q);
-  return data.filter((c) => {
+  let results = data.filter((c) => {
     if (isKorean) return c.mfdsItemName.toUpperCase().includes(q);
     return (c.mfdsEngName || "").toUpperCase().includes(q) || c.mfdsItemName.toUpperCase().includes(q);
   });
+  if (results.length === 0 && isKorean) {
+    const baseQ = stripDosageForm(q);
+    if (baseQ !== q && baseQ.length >= 2) {
+      results = data.filter((c) => c.mfdsItemName.toUpperCase().includes(baseQ));
+    }
+  }
+  return results;
 }
 
 function simulateProcess(productNames: string[], allCandidates: MFDSCandidate[]) {
