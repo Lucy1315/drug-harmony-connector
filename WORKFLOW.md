@@ -52,12 +52,14 @@
 #### 4-1. 참조 데이터 로딩 (`mfds-local.ts`)
 - `public/data/mfds-data.xlsx` 파일에서 MFDS 허가 데이터 파싱
 - **제외 항목**: `취소/취하` 상태인 품목은 제외
+- **신약구분 필드**: `findNewDrugField()` — "신약구분", "신약 구분", "NEW_DRUG" 등 컬럼명을 동적 감지, 값이 `Y`이면 `isNewDrug = true`
 - **캐싱**: 최초 1회만 로딩 후 메모리 캐시 사용
-- **필드 매핑**: `제품명`, `제품영문명`, `주성분`, `주성분영문`, `허가일`, `허가번호`, `품목기준코드`, `업체명`
+- **필드 매핑**: `제품명`, `제품영문명`, `주성분`, `주성분영문`, `허가일`, `허가번호`, `품목기준코드`, `업체명`, `신약구분(isNewDrug)`
 
 #### 4-2. 검색 (`mfds-local.ts: searchLocal()`)
 - **한글 검색**: `mfdsItemName`에 포함 여부 (대소문자 무시)
 - **영문 검색**: `mfdsEngName` 또는 `mfdsItemName`에 포함 여부
+- **제형 제거 fallback**: 한글 검색 결과가 없을 때, 제형 접미사(`정`, `주`, `캡슐` 등)를 제거 후 재검색
 
 #### 4-3. 최적 매칭 (`drug-matcher.ts: findBestMatch()`)
 | 우선순위 | 조건 | 매칭 품질 |
@@ -67,22 +69,47 @@
 | 3 | 영문: 영문명 부분 일치 | EXACT |
 | 4 | 후보 중 허가일 가장 빠른 것 | FUZZY |
 
-#### 4-4. 집계 계산 (`drug-matcher.ts: computeAggregates()`)
+#### 4-4. 성분명 정규화 (`drug-matcher.ts`)
 
-**성분명 정규화** (`normalizeIngredient` = `normalizeDosage`):
-- 괄호 내용 제거 `(유전자재조합)` 등
-- 용량/단위 제거 (`mg`, `mL`, `%`, `밀리그램` 등)
+**영문 성분명 정규화** (`normalizeIngredientEng`):
+- 괄호 내용 제거
+- 용량/단위 제거
+- 영문 pharma suffix 제거: `HEPTAHYDRATE`, `DISODIUM`, `HYDROCHLORIDE`, `MESYLATE`, `ANHYDROUS`, `MICRONIZED` 등 (50+종)
 - 대문자 변환 후 공백 정리
 
-**제네릭 수 산출 로직**:
+**한국어 성분명 정규화** (`normalizeIngredientKor`):
+- 괄호 내용 제거
+- 용량/단위 제거 (밀리그램, mg 등)
+- 한국어 pharma suffix 제거: `칠수화물`, `이나트륨염`, `염산염`, `무수물` 등 (40+종)
+- 예: `페메트렉시드이나트륨염칠수화물` → `페메트렉시드`
+
+**성분 그룹키 결정** (`getIngredientGroupKey`):
+- 영문 성분명 우선 → `normalizeIngredientEng` 적용
+- 영문 없으면 → `normalizeIngredientKor` 적용
+
+#### 4-5. 이중 그룹핑 (Cross-reference) (`computeAggregates`)
+
+일부 MFDS 레코드는 `ingredientEng`(주성분영문)이 비어있어 한국어 성분명으로 폴백됩니다.
+동일 성분인데 별도 그룹으로 분리되는 문제를 방지하기 위해 **이중 그룹핑 전략**을 사용합니다:
+
+```
+1차: 영문+한국어 모두 있는 레코드에서 [정규화 한국어 → 영문 그룹키] 매핑 테이블 구축
+2차: 영문 없는 레코드의 정규화 한국어가 매핑 테이블에 있으면 해당 영문 그룹에 병합
+3차: 어디에도 속하지 않는 레코드는 한국어 키로 독립 그룹 유지
+```
+
+#### 4-6. 제네릭 수 산출 로직 (`computeAggregates`)
+
 1. 전체 MFDS 데이터를 `itemSeq`(품목기준코드) 기준으로 중복 제거
-2. 정규화된 성분명별로 그룹핑
-3. 각 그룹 내에서 제품명을 용량 무관하게 정규화 → 고유 제품명 목록 산출
+2. 정규화된 성분명별로 그룹핑 (이중 그룹핑 적용)
+3. 각 그룹 내에서 제품명을 용량 무관하게 정규화(`normalizeDosage`) → 고유 제품명 목록 산출
 4. 각 제품명의 최초 허가일 추적
-5. **오리지널 제품** = `신약구분` 필드가 'Y'인 제품(들). 신약구분 데이터가 없는 경우 최초 허가일 기준으로 fallback
+5. **오리지널 제품 판별** (우선순위):
+   - **1순위**: `신약구분` 필드가 `Y`인 제품(들) → 오리지널로 분류
+   - **2순위 (fallback)**: 해당 성분 그룹에 `신약구분=Y` 제품이 없으면, 최초 허가일 기준으로 오리지널 판별
 6. **제네릭 수** = 고유 제품명 수 − 오리지널 제품 수
 
-> **예시**: 페메트렉시드 성분에 알림타(신약구분=Y), 알지크(N), 페메렉주(N) 등 → 오리지널 1개(알림타), 나머지는 제네릭
+> **예시**: 페메트렉시드 성분에 알림타(신약구분=Y), 알지크(N), 페메드(N) 등 → 오리지널 1개(알림타), 나머지는 제네릭
 
 ### 5단계: 결과 출력 (`buildFinalRows()`, `ResultsTable.tsx`, `Index.tsx`)
 
@@ -97,10 +124,15 @@
 | **E** | MFDS 제품명 | 동일 성분의 모든 등록 제품명 목록 |
 | **F** | 순번 | 입력 파일의 순번 (있는 경우) |
 
+#### 오리지널 제품 판별 기준 (`buildFinalRows`)
+- `ingredientOriginals` 맵에 각 성분 그룹의 오리지널 제품명 저장
+- **1순위**: `신약구분=Y`인 MFDS 제품명
+- **2순위**: 신약구분 데이터가 없는 성분 그룹은 최초 허가일(`minPermitDate`) 기준
+
 #### 매칭 실패 탭
 | 사유 코드 | 설명 |
 |-----------|------|
-| `NO_RESULT` | 검색 결과 없음 |
+| `NO_RESULT` | 한글 검색 결과 없음 |
 | `NO_RESULT_ENG` | 영문 검색 결과 없음 |
 | `AMBIGUOUS` | 후보가 있으나 최적 매칭 불가 |
 
@@ -120,13 +152,62 @@ src/
 │   └── ProgressBar.tsx         # 진행률 표시
 ├── lib/
 │   ├── drug-matcher.ts         # 정규화, 매칭, 집계 로직
+│   │   ├── cleanProduct()           # 제품명 정규화
+│   │   ├── normalizeDosage()        # 용량/단위 제거
+│   │   ├── normalizeIngredientEng() # 영문 성분명 정규화 (salt/hydrate 제거)
+│   │   ├── normalizeIngredientKor() # 한국어 성분명 정규화 (염형태/수화물 제거)
+│   │   ├── getIngredientGroupKey()  # 성분 그룹키 (영문 우선, 한국어 fallback)
+│   │   ├── findBestMatch()          # 최적 후보 매칭
+│   │   ├── computeAggregates()      # 제네릭 수 산출 (이중 그룹핑 + 신약구분)
+│   │   └── buildFinalRows()         # 최종 출력 행 생성
 │   ├── process-engine.ts       # 처리 파이프라인 (번역 + 검색 + 매칭)
+│   │   ├── translateEngToKor()      # 영문→한글 AI 번역
+│   │   ├── getUniqueKeys()          # 고유 키 추출 + 영문 분류
+│   │   └── processProducts()        # 전체 처리 오케스트레이션
 │   └── mfds-local.ts           # MFDS 엑셀 데이터 로더/검색
+│       ├── getMFDSData()            # 데이터 로딩 + 캐싱
+│       ├── searchLocal()            # 제품명 기반 검색 (제형 제거 fallback 포함)
+│       ├── searchByIngredient()     # 성분명 기반 검색
+│       └── findNewDrugField()       # 신약구분 컬럼 동적 감지
 public/
-└── data/mfds-data.xlsx         # MFDS 허가 데이터 (참조 DB)
+└── data/mfds-data.xlsx         # MFDS 허가 데이터 (참조 DB, 신약구분 컬럼 포함)
 supabase/functions/
 ├── translate-drug-names/       # 영문→한글 AI 번역 Edge Function
 └── mfds-proxy/                 # (레거시) MFDS API 프록시
+```
+
+---
+
+## 핵심 데이터 구조
+
+### MFDSCandidate (MFDS 허가 품목 1건)
+```typescript
+interface MFDSCandidate {
+  mfdsItemName: string;      // 제품명 (한글)
+  mfdsEngName?: string;      // 제품영문명
+  ingredient: string;        // 주성분 (한글)
+  ingredientEng?: string;    // 주성분영문
+  permitDate: string;        // 허가일 (YYYYMMDD)
+  permitNo: string;          // 허가번호
+  itemSeq: string;           // 품목기준코드 (고유 식별자)
+  companyName?: string;      // 업체명
+  isNewDrug?: boolean;       // 신약구분 ('Y' = 오리지널 의약품)
+}
+```
+
+### FinalRow (최종 출력 행)
+```typescript
+interface FinalRow {
+  product: string;           // 원본 제품명
+  originalFlag: string;      // "O" 또는 "X"
+  genericCount: number;      // 제네릭 수
+  ingredient: string;        // 주성분 (한글)
+  ingredientEng?: string;    // 주성분 (영문)
+  mfdsItemName: string;      // 동일 성분 MFDS 등록 제품명 전체
+  originalMfdsNames?: string[]; // 오리지널 제품명 목록
+  순번: string;
+  matchQuality?: MatchQuality;
+}
 ```
 
 ---
