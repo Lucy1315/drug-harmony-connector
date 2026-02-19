@@ -107,6 +107,46 @@ export function normalizeIngredient(s: string): string {
   return normalizeDosage(s);
 }
 
+// Common pharmaceutical salt forms and hydration states to strip for ingredient grouping
+const PHARMA_SUFFIXES = [
+  'HEPTAHYDRATE', 'HEXAHYDRATE', 'PENTAHYDRATE', 'TETRAHYDRATE',
+  'TRIHYDRATE', 'SESQUIHYDRATE', 'DIHYDRATE', 'MONOHYDRATE', 'HYDRATE',
+  'DISODIUM', 'TRISODIUM', 'MONOSODIUM', 'SODIUM', 'POTASSIUM', 'CALCIUM', 'MAGNESIUM',
+  'HYDROCHLORIDE', 'DIHYDROCHLORIDE', 'MONOHYDROCHLORIDE',
+  'MESYLATE', 'MESILATE', 'MALEATE', 'FUMARATE', 'HEMIFUMARATE',
+  'TARTRATE', 'BITARTRATE', 'SUCCINATE', 'BESYLATE', 'BESILATE', 'TOSYLATE',
+  'ACETATE', 'DIACETATE', 'CITRATE', 'SULFATE', 'SULPHATE',
+  'PHOSPHATE', 'NITRATE', 'BROMIDE', 'CHLORIDE', 'IODIDE',
+  'MEGLUMINE', 'TROMETHAMINE', 'LYSINE', 'ARGININE',
+  'PIVOXIL', 'AXETIL', 'MEDOXOMIL', 'CILEXETIL', 'MOFETIL',
+  'VALERATE', 'PROPIONATE', 'BUTYRATE', 'FUROATE', 'DIPROPIONATE',
+  'PAMOATE', 'EMBONATE', 'STEARATE', 'PALMITATE',
+  'XINAFOATE', 'NAPSYLATE', 'DECANOATE', 'ENANTHATE',
+].sort((a, b) => b.length - a.length); // longest first to avoid partial matches
+
+/**
+ * Normalize English ingredient name for grouping:
+ * strips dosage, salt forms, and hydration states so that
+ * "Pemetrexed Disodium Heptahydrate" and "Pemetrexed Disodium" → "PEMETREXED"
+ */
+export function normalizeIngredientEng(s: string): string {
+  let n = normalizeDosage(s);
+  for (const suffix of PHARMA_SUFFIXES) {
+    n = n.replace(new RegExp('\\b' + suffix + '\\b', 'g'), '');
+  }
+  n = n.replace(/\s+/g, ' ').trim();
+  return n;
+}
+
+/**
+ * Get the best grouping key for an ingredient: prefer English (normalized), fallback to Korean.
+ */
+export function getIngredientGroupKey(candidate: { ingredient?: string; ingredientEng?: string }): string {
+  const eng = (candidate.ingredientEng || '').trim();
+  if (eng) return normalizeIngredientEng(eng);
+  return normalizeIngredient(candidate.ingredient || '');
+}
+
 // Clean English name for comparison
 function cleanEngName(s: string): string {
   return s.toUpperCase().replace(/\./g, ' ').replace(/\s+/g, ' ').trim();
@@ -180,12 +220,12 @@ export function computeAggregates(
     }
   }
 
-  // Group by NORMALIZED ingredient
-  // First pass: find all product names and earliest permit date per ingredient
+  // Group by NORMALIZED ENGLISH ingredient (fallback to Korean)
+  // This ensures "Pemetrexed Disodium Heptahydrate" and "Pemetrexed Disodium" are in the same group
   const ingredientMap = new Map<string, { normalizedProductNames: Map<string, string>; minDate: string }>();
 
   for (const [, c] of masterMap) {
-    const ingr = normalizeIngredient(c.ingredient || '');
+    const ingr = getIngredientGroupKey(c);
     if (!ingr) continue;
     const entry = ingredientMap.get(ingr) || { normalizedProductNames: new Map(), minDate: '99999999' };
     const normalizedName = normalizeDosage(c.mfdsItemName || '');
@@ -202,12 +242,11 @@ export function computeAggregates(
     ingredientMap.set(ingr, entry);
   }
 
-  // Second pass: count generics = total unique product names MINUS original product names
+  // Count generics = total unique product names MINUS original product names
   // Original = product(s) with the earliest permit date for that ingredient
   const result = new Map<string, { genericCount: number; minPermitDate: string }>();
   for (const [ingr, data] of ingredientMap) {
     const { normalizedProductNames, minDate } = data;
-    // Count how many unique product names are NOT the original (don't have the earliest date)
     let originalCount = 0;
     for (const [, productDate] of normalizedProductNames) {
       if (productDate === minDate) originalCount++;
@@ -227,11 +266,11 @@ export function buildFinalRows(
   const allMatched = results.filter((r): r is MatchedResult => r.type === 'matched');
   const aggregates = computeAggregates(allMatched, allCandidates);
 
-  // Build normalized ingredient → all unique MFDS product names map from all candidates
+  // Build ingredient group key → all unique MFDS product names map from all candidates
   const ingredientProductNames = new Map<string, Set<string>>();
   if (allCandidates) {
     for (const c of allCandidates) {
-      const ingr = normalizeIngredient(c.ingredient || '');
+      const ingr = getIngredientGroupKey(c);
       if (!ingr || !c.mfdsItemName) continue;
       if (!ingredientProductNames.has(ingr)) {
         ingredientProductNames.set(ingr, new Set());
@@ -240,11 +279,11 @@ export function buildFinalRows(
     }
   }
 
-  // Build normalized ingredient → original product names (earliest permit date)
+  // Build ingredient group key → original product names (earliest permit date)
   const ingredientOriginals = new Map<string, Set<string>>();
   if (allCandidates) {
     for (const c of allCandidates) {
-      const ingr = normalizeIngredient(c.ingredient || '');
+      const ingr = getIngredientGroupKey(c);
       if (!ingr || !c.mfdsItemName) continue;
       const stats = aggregates.get(ingr);
       if (stats && c.permitDate === stats.minPermitDate) {
@@ -281,7 +320,7 @@ export function buildFinalRows(
       continue;
     }
 
-    const ingr = normalizeIngredient(r.candidate.ingredient || '');
+    const ingr = getIngredientGroupKey(r.candidate);
     const stats = aggregates.get(ingr);
     const genericCount = stats?.genericCount || 0;
     // B열: O if original product exists in MFDS for this ingredient, X if not
