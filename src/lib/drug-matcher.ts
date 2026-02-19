@@ -458,14 +458,20 @@ export function buildFinalRows(
     const ingr = resolveIngredientGroupKey(r.candidate, korToEngMap);
     const stats = aggregates.get(ingr);
     const genericCount = stats?.genericCount || 0;
-    const originalFlag = ingr && stats ? 'O' : 'X';
+    
+    // Original flag: "O" only if the matched product itself is 신약구분=Y,
+    // or if no 신약구분 data exists in the group, the earliest permit date product
+    const originals = ingredientOriginals.get(ingr);
+    const matchedProductName = r.candidate.mfdsItemName || '';
+    const isOriginal = originals ? originals.has(matchedProductName) : false;
+    const originalFlag = isOriginal ? 'O' : (ingr && stats ? 'X' : 'X');
 
     const allNames = ingredientProductNames.get(ingr);
     const mfdsItemName = allNames && allNames.size > 0
       ? [...allNames].join(', ')
       : r.candidate.mfdsItemName || '';
 
-    const originals = ingredientOriginals.get(ingr);
+    const originalsForDisplay = ingredientOriginals.get(ingr);
 
     matched.push({
       product: r.product,
@@ -474,7 +480,7 @@ export function buildFinalRows(
       ingredient: r.candidate.ingredient || '',
       ingredientEng: r.candidate.ingredientEng || '',
       mfdsItemName,
-      originalMfdsNames: originals ? [...originals] : undefined,
+      originalMfdsNames: originalsForDisplay ? [...originalsForDisplay] : undefined,
       순번,
       matchQuality: r.matchQuality,
     });
