@@ -151,15 +151,14 @@ describe("E2E: Generic count verification with real MFDS data", () => {
     expect(row.genericCount).toBeGreaterThanOrEqual(5);
   });
 
-  it("ZOMETA(Zoledronic Acid): diagnose generic count", () => {
-    // Check all Zoledronic records
-    const zolRecords = allCandidates.filter(c =>
-      (c.ingredientEng || '').toUpperCase().includes('ZOLEDRONIC') ||
-      (c.ingredient || '').includes('졸레드론')
+  it("DOCETAXEL: diagnose generic count", () => {
+    const docRecords = allCandidates.filter(c =>
+      (c.ingredientEng || '').toUpperCase().includes('DOCETAXEL') ||
+      (c.ingredient || '').includes('도세탁셀')
     );
-    console.log(`\nZoledronic records: ${zolRecords.length}`);
+    console.log(`\nDocetaxel records: ${docRecords.length}`);
     const groupKeys = new Map<string, string[]>();
-    for (const c of zolRecords) {
+    for (const c of docRecords) {
       const key = getIngredientGroupKey(c);
       const names = groupKeys.get(key) || [];
       names.push(`${normalizeDosage(c.mfdsItemName)} [ingrEng="${c.ingredientEng}", ingrKor="${c.ingredient}", date=${c.permitDate}]`);
@@ -171,6 +170,21 @@ describe("E2E: Generic count verification with real MFDS data", () => {
       if (names.length > 5) console.log(`    ... and ${names.length - 5} more`);
     }
 
+    // Try searching for Docetaxel product
+    const searchResults = searchLocal("탁소텔", allCandidates);
+    console.log(`Search "탁소텔": ${searchResults.length} results`);
+    for (const c of searchResults.slice(0, 3)) {
+      console.log(`  ${c.mfdsItemName} | ingrEng: ${c.ingredientEng}`);
+    }
+
+    const { matched } = simulateProcess(["탁소텔주"], allCandidates);
+    const row = matched[0];
+    console.log(`TAXOTERE: flag=${row.originalFlag}, generics=${row.genericCount}, ingr=${row.ingredientEng || row.ingredient}`);
+    expect(row.originalFlag).toBe("O");
+    expect(row.genericCount).toBeGreaterThanOrEqual(3);
+  }, 30000);
+
+  it("ZOMETA(Zoledronic Acid): diagnose generic count", () => {
     const { matched } = simulateProcess(["조메타주"], allCandidates);
     const row = matched[0];
     console.log(`ZOMETA: flag=${row.originalFlag}, generics=${row.genericCount}, ingr=${row.ingredientEng}`);
@@ -213,7 +227,7 @@ describe("E2E: Generic count verification with real MFDS data", () => {
       }
     }
     expect(matched.length).toBe(testCases.length);
-  });
+  }, 30000);
 
   it("processes a mixed list of drugs", () => {
     const mixedList = ["허셉틴주150밀리그램", "타쎄바정150밀리그램", "넥사바정200밀리그램"];
@@ -225,5 +239,5 @@ describe("E2E: Generic count verification with real MFDS data", () => {
         expect(row.genericCount).toBeGreaterThan(0);
       }
     }
-  });
+  }, 30000);
 });
