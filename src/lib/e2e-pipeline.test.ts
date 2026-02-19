@@ -51,6 +51,18 @@ function loadMFDSData(): MFDSCandidate[] {
     if (!itemName) continue;
     const status = String(row["취소/취하"] || "").trim();
     if (status === "취하" || status === "취소") continue;
+    // Dynamically find 신약구분 column
+    let isNewDrug = false;
+    for (const key of Object.keys(row)) {
+      if (key.includes('신약')) {
+        isNewDrug = String(row[key]).trim().toUpperCase() === 'Y';
+        break;
+      }
+    }
+    if (!isNewDrug) {
+      isNewDrug = String(row['신약구분'] || '').trim().toUpperCase() === 'Y';
+    }
+    
     candidates.push({
       mfdsItemName: itemName,
       mfdsEngName: String(row["제품영문명"] || "").trim(),
@@ -60,6 +72,7 @@ function loadMFDSData(): MFDSCandidate[] {
       permitNo: String(row["허가번호"] || "").trim(),
       itemSeq: String(row["품목기준코드"] || "").trim(),
       companyName: String(row["업체명"] || "").trim(),
+      isNewDrug,
     });
   }
   return candidates;
