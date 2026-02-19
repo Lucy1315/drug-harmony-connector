@@ -77,6 +77,21 @@ export async function getMFDSData(): Promise<MFDSCandidate[]> {
   return loadingPromise;
 }
 
+// Korean dosage form suffixes to strip for flexible matching
+const KOR_DOSAGE_FORMS = ['필름코팅정', '서방정', '장용정', '츄어블정', '분산정', '구강붕해정', '정', '주사액', '주사', '주', '캡슐', '시럽', '현탁액', '액', '산', '연고', '크림', '패치', '점안액', '점비액'];
+
+/** Extract base product name by stripping Korean dosage forms */
+function stripDosageForm(name: string): string {
+  const upper = name.toUpperCase().trim();
+  for (const form of KOR_DOSAGE_FORMS) {
+    const formUpper = form.toUpperCase();
+    if (upper.endsWith(formUpper) && upper.length > formUpper.length) {
+      return upper.slice(0, -formUpper.length);
+    }
+  }
+  return upper;
+}
+
 /** Search local MFDS data by product name (Korean or English) */
 export async function searchLocal(query: string): Promise<MFDSCandidate[]> {
   const data = await getMFDSData();
@@ -85,17 +100,28 @@ export async function searchLocal(query: string): Promise<MFDSCandidate[]> {
 
   const isKorean = /[\uAC00-\uD7AF]/.test(q);
 
-  return data.filter((c) => {
+  // First try exact substring match
+  let results = data.filter((c) => {
     if (isKorean) {
       return c.mfdsItemName.toUpperCase().includes(q);
     } else {
-      // Search both English name and Korean name
       return (
         (c.mfdsEngName || '').toUpperCase().includes(q) ||
         c.mfdsItemName.toUpperCase().includes(q)
       );
     }
   });
+
+  // If no results and Korean, try with dosage form stripped
+  // e.g. "글리벡정" → "글리벡" to match "글리벡필름코팅정"
+  if (results.length === 0 && isKorean) {
+    const baseQ = stripDosageForm(q);
+    if (baseQ !== q && baseQ.length >= 2) {
+      results = data.filter((c) => c.mfdsItemName.toUpperCase().includes(baseQ));
+    }
+  }
+
+  return results;
 }
 
 /** Search by ingredient name */
