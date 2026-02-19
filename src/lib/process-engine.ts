@@ -98,6 +98,11 @@ export async function processProducts(opts: ProcessOptions): Promise<{ results: 
     cache.set(key, results);
     completed++;
     onProgress(completed, totalKeys);
+
+    // Yield to UI thread every 10 keys to prevent freezing
+    if (completed % 10 === 0) {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
   }
 
   // Collect ALL candidates from the full dataset for aggregation

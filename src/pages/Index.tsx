@@ -60,6 +60,9 @@ const Index = () => {
       confirmedTranslations,
     });
 
+    // Yield to UI thread before heavy aggregation
+    await new Promise(resolve => setTimeout(resolve, 0));
+
     const { matched: m, unmatched: u } = buildFinalRows(results, inputRows, allCandidates);
     setMatched(m);
     setUnmatched(u);

@@ -264,7 +264,7 @@ export function computeAggregates(
   }
 
   // Phase 1: Initial grouping by getIngredientGroupKey (English preferred, Korean fallback)
-  const ingredientMap = new Map<string, { normalizedProductNames: Map<string, string>; minDate: string }>();
+  const ingredientMap = new Map<string, { normalizedProductNames: Map<string, string>; minDate: string; newDrugProducts: Set<string> }>();
 
   // Also build a mapping: normalized Korean ingredient → English group key (for cross-referencing)
   const korToEngMap = new Map<string, string>(); // normalizedKor → engGroupKey
@@ -283,6 +283,7 @@ export function computeAggregates(
   }
 
   // Second pass: assign each candidate to a group, using cross-reference for Korean-only records
+  // Also collect newDrug products per group in the same pass (avoids O(n×m) re-scan)
   for (const [, c] of masterMap) {
     let ingr = getIngredientGroupKey(c);
     if (!ingr) continue;
@@ -297,13 +298,17 @@ export function computeAggregates(
       }
     }
 
-    const entry = ingredientMap.get(ingr) || { normalizedProductNames: new Map(), minDate: '99999999' };
+    const entry = ingredientMap.get(ingr) || { normalizedProductNames: new Map(), minDate: '99999999', newDrugProducts: new Set() };
     const normalizedName = normalizeDosage(c.mfdsItemName || '');
     if (normalizedName) {
       const existingDate = entry.normalizedProductNames.get(normalizedName) || '99999999';
       const dt = c.permitDate || '99999999';
       if (dt < existingDate) {
         entry.normalizedProductNames.set(normalizedName, dt);
+      }
+      // Track 신약구분 products in the same pass
+      if (c.isNewDrug) {
+        entry.newDrugProducts.add(normalizedName);
       }
     }
     const dt = c.permitDate || '99999999';
@@ -315,23 +320,7 @@ export function computeAggregates(
   // Original = product(s) marked as 신약구분='Y' (isNewDrug), or fallback to earliest permit date
   const result = new Map<string, { genericCount: number; minPermitDate: string }>();
   for (const [ingr, data] of ingredientMap) {
-    const { normalizedProductNames, minDate } = data;
-    
-    // Check if any product in this group has isNewDrug=true
-    const newDrugProducts = new Set<string>();
-    for (const [, c] of masterMap) {
-      const cIngr = getIngredientGroupKey(c);
-      const eng = (c.ingredientEng || '').trim();
-      let resolvedIngr = cIngr;
-      if (!eng) {
-        const korKey = normalizeIngredientKor(c.ingredient || '');
-        const mappedEngKey = korToEngMap.get(korKey);
-        if (mappedEngKey) resolvedIngr = mappedEngKey;
-      }
-      if (resolvedIngr === ingr && c.isNewDrug) {
-        newDrugProducts.add(normalizeDosage(c.mfdsItemName || ''));
-      }
-    }
+    const { normalizedProductNames, minDate, newDrugProducts } = data;
     
     let originalCount: number;
     if (newDrugProducts.size > 0) {
