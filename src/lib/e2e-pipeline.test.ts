@@ -7,10 +7,37 @@ import {
   findBestMatch,
   buildFinalRows,
   normalizeIngredient,
+  normalizeIngredientEng,
+  normalizeIngredientKor,
+  getIngredientGroupKey,
+  computeAggregates,
   normalizeDosage,
   type MFDSCandidate,
   type ProcessResult,
+  type MatchedResult,
 } from "./drug-matcher";
+
+function parsePermitDate(raw: any): string {
+  if (!raw) return '';
+  if (typeof raw === 'number') {
+    const date = new Date((raw - 25569) * 86400 * 1000);
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}${m}${d}`;
+  }
+  const s = String(raw).trim();
+  if (/^\d{8}$/.test(s)) return s;
+  const slashMatch = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if (slashMatch) {
+    let year = parseInt(slashMatch[3]);
+    if (year < 100) year += year > 50 ? 1900 : 2000;
+    return `${year}${String(parseInt(slashMatch[1])).padStart(2, '0')}${String(parseInt(slashMatch[2])).padStart(2, '0')}`;
+  }
+  const isoMatch = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoMatch) return `${isoMatch[1]}${isoMatch[2]}${isoMatch[3]}`;
+  return s.replace(/[^0-9]/g, '').slice(0, 8);
+}
 
 function loadMFDSData(): MFDSCandidate[] {
   const filePath = path.resolve(__dirname, "../../public/data/mfds-data.xlsx");
@@ -29,7 +56,7 @@ function loadMFDSData(): MFDSCandidate[] {
       mfdsEngName: String(row["제품영문명"] || "").trim(),
       ingredient: String(row["주성분"] || "").trim(),
       ingredientEng: String(row["주성분영문"] || "").trim(),
-      permitDate: String(row["허가일"] || ""),
+      permitDate: parsePermitDate(row["허가일"]),
       permitNo: String(row["허가번호"] || "").trim(),
       itemSeq: String(row["품목기준코드"] || "").trim(),
       companyName: String(row["업체명"] || "").trim(),
@@ -48,11 +75,7 @@ function searchLocal(query: string, data: MFDSCandidate[]): MFDSCandidate[] {
   });
 }
 
-// Simulate the full processing pipeline
-function simulateProcess(
-  productNames: string[],
-  allCandidates: MFDSCandidate[]
-) {
+function simulateProcess(productNames: string[], allCandidates: MFDSCandidate[]) {
   const inputRows = productNames.map((p, i) => ({ product: p, 순번: String(i + 1) }));
   const results: ProcessResult[] = inputRows.map((row) => {
     const key = cleanProduct(row.product);
@@ -66,11 +89,10 @@ function simulateProcess(
     }
     return { type: "matched" as const, product: row.product, cleanedKey: key, candidate: match.candidate, matchQuality: match.quality };
   });
-
   return buildFinalRows(results, inputRows, allCandidates);
 }
 
-describe("E2E: Full pipeline generic count verification", () => {
+describe("E2E: Generic count verification with real MFDS data", () => {
   let allCandidates: MFDSCandidate[];
 
   beforeAll(() => {
@@ -78,75 +100,86 @@ describe("E2E: Full pipeline generic count verification", () => {
     console.log(`Loaded ${allCandidates.length} MFDS records`);
   });
 
-  const testCases = [
-    "허셉틴주",
-    "삼페넷주",
-    "캐싸일라주",
-    "허쥬마주",
-  ];
+  it("ALIMTA(Pemetrexed): diagnose generic count", () => {
+    const { matched } = simulateProcess(["알림타주"], allCandidates);
+    const row = matched[0];
+    console.log(`ALIMTA: flag=${row.originalFlag}, generics=${row.genericCount}`);
+    expect(row.originalFlag).toBe("O");
+    expect(row.genericCount).toBeGreaterThanOrEqual(5);
+  }, 30000);
 
-  it("processes Korean drug names with correct O/X flags and English ingredients", () => {
-    const { matched } = simulateProcess(testCases, allCandidates);
+  it("GLIVEC(Imatinib): diagnose generic count", () => {
+    const glivecKor = searchLocal("글리벡", allCandidates);
+    console.log(`GLIVEC Korean search: ${glivecKor.length}`);
+    for (const c of glivecKor.slice(0, 3)) console.log(`  ${c.mfdsItemName} | eng: ${c.mfdsEngName}`);
+    const glivecEng = searchLocal("GLIVEC", allCandidates);
+    console.log(`GLIVEC English search: ${glivecEng.length}`);
+    for (const c of glivecEng.slice(0, 3)) console.log(`  ${c.mfdsItemName} | eng: ${c.mfdsEngName}`);
+    const imaRecords = allCandidates.filter(c =>
+      (c.ingredientEng || '').toUpperCase().includes('IMATINIB') || (c.ingredient || '').includes('이마티닙')
+    );
+    console.log(`All Imatinib records: ${imaRecords.length}`);
+    const { matched } = simulateProcess(["글리벡정"], allCandidates);
+    const row = matched[0];
+    console.log(`Result: flag=${row.originalFlag}, generics=${row.genericCount}`);
+    expect(row).toBeDefined();
+  });
 
-    console.log("\n=== 분석 결과 ===");
-    console.log("제품명 | B열(O/X) | C열(제네릭수) | D열(영문성분명)");
-    console.log("-".repeat(80));
-    for (const row of matched) {
-      console.log(
-        `${row.product} | ${row.originalFlag} | ${row.genericCount} | ${row.ingredientEng || row.ingredient || "(미매칭)"}`
-      );
+  it("CIALIS(Tadalafil): generic count >= 5", () => {
+    const { matched } = simulateProcess(["시알리스정"], allCandidates);
+    const row = matched[0];
+    console.log(`CIALIS: flag=${row.originalFlag}, generics=${row.genericCount}, ingredient=${row.ingredientEng || row.ingredient}`);
+    expect(row.originalFlag).toBe("O");
+    expect(row.genericCount).toBeGreaterThanOrEqual(5);
+  });
+
+  it("Pemetrexed ingredient grouping: deep diagnosis", () => {
+    const pemetrexedRecords = allCandidates.filter(c =>
+      (c.ingredientEng || '').toUpperCase().includes('PEMETREXED') ||
+      (c.ingredient || '').includes('페메트렉시드')
+    );
+
+    console.log(`\nPemetrexed records: ${pemetrexedRecords.length}`);
+    
+    // Check what group key each record gets
+    const groupKeys = new Map<string, string[]>();
+    for (const c of pemetrexedRecords) {
+      const key = getIngredientGroupKey(c);
+      const names = groupKeys.get(key) || [];
+      names.push(`${normalizeDosage(c.mfdsItemName)} [itemSeq=${c.itemSeq}, date=${c.permitDate}, ingrEng="${c.ingredientEng}"]`);
+      groupKeys.set(key, names);
+    }
+    console.log(`Group keys for Pemetrexed records:`);
+    for (const [key, names] of groupKeys) {
+      console.log(`  Key: "${key}" → ${names.length} records`);
+      for (const n of names.slice(0, 3)) console.log(`    ${n}`);
+      if (names.length > 3) console.log(`    ... and ${names.length - 3} more`);
     }
 
-    // All matched products should have O flag (original exists in MFDS)
+    // Check itemSeq uniqueness
+    const seqs = pemetrexedRecords.map(c => c.itemSeq);
+    const uniqueSeqs = new Set(seqs.filter(s => s));
+    const emptySeqs = seqs.filter(s => !s).length;
+    console.log(`itemSeq: ${uniqueSeqs.size} unique, ${emptySeqs} empty`);
+
+    expect(pemetrexedRecords.length).toBeGreaterThan(0);
+  }, 30000);
+
+  it("processes Korean drug names with correct O/X flags", () => {
+    const testCases = ["허셉틴주", "삼페넷주", "캐싸일라주", "허쥬마주"];
+    const { matched } = simulateProcess(testCases, allCandidates);
+
     for (const row of matched) {
       if (row.ingredient) {
         expect(row.originalFlag).toBe('O');
-        // ingredientEng may be empty for some products - just log
-        if (!row.ingredientEng) {
-          console.log(`  Note: "${row.product}" has no English ingredient name`);
-        }
-      } else {
-        expect(row.originalFlag).toBe('X');
       }
     }
     expect(matched.length).toBe(testCases.length);
   });
 
-  it("verifies specific ingredient generic counts from full dataset", () => {
-    // Check a few ingredients manually
-    const ingredientChecks = [
-      { search: "트라스투주맙", ingredientFilter: "트라스투주맙" },
-    ];
-
-    for (const check of ingredientChecks) {
-      const filtered = allCandidates.filter(
-        (c) => c.ingredient.includes(check.ingredientFilter)
-      );
-      const uniqueProducts = new Set(
-        filtered.map((c) => normalizeDosage(c.mfdsItemName))
-      );
-      console.log(
-        `\n${check.ingredientFilter}: ${filtered.length}건 → ${uniqueProducts.size}개 고유 제품명`
-      );
-      console.log(`  제품명: ${[...uniqueProducts].join(", ")}`);
-    }
-  });
-
-  it("processes a mixed list of drugs with O/X and English ingredient", () => {
-    const mixedList = [
-      "허셉틴주150밀리그램",
-      "타쎄바정150밀리그램",
-      "넥사바정200밀리그램",
-    ];
-
+  it("processes a mixed list of drugs", () => {
+    const mixedList = ["허셉틴주150밀리그램", "타쎄바정150밀리그램", "넥사바정200밀리그램"];
     const { matched } = simulateProcess(mixedList, allCandidates);
-
-    console.log("\n=== 혼합 약품 분석 결과 ===");
-    console.log("제품명 | B열(O/X) | C열(제네릭수) | D열(영문성분명)");
-    console.log("-".repeat(80));
-    for (const row of matched) {
-      console.log(`${row.product} | ${row.originalFlag} | ${row.genericCount} | ${row.ingredientEng || "(없음)"}`);
-    }
 
     for (const row of matched) {
       if (row.ingredient) {

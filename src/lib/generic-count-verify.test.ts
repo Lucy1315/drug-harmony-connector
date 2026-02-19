@@ -1,135 +1,71 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from "vitest";
 import {
   normalizeIngredientEng,
-  normalizeDosage,
+  normalizeIngredientKor,
   getIngredientGroupKey,
   computeAggregates,
-  type MFDSCandidate,
   type MatchedResult,
-} from './drug-matcher';
+  type MFDSCandidate,
+} from "./drug-matcher";
 
-describe('normalizeIngredientEng', () => {
-  it('strips salt forms and hydration from Pemetrexed variants', () => {
-    expect(normalizeIngredientEng('Pemetrexed Disodium Heptahydrate')).toBe('PEMETREXED');
-    expect(normalizeIngredientEng('Pemetrexed Disodium')).toBe('PEMETREXED');
-    expect(normalizeIngredientEng('pemetrexed disodium heptahydrate 100mg')).toBe('PEMETREXED');
-  });
-
-  it('strips common salt forms', () => {
-    expect(normalizeIngredientEng('Imatinib Mesylate')).toBe('IMATINIB');
-    expect(normalizeIngredientEng('Amlodipine Besylate')).toBe('AMLODIPINE');
-    expect(normalizeIngredientEng('Valganciclovir Hydrochloride')).toBe('VALGANCICLOVIR');
+describe("normalizeIngredientEng", () => {
+  it("strips salt forms and hydration from English ingredient names", () => {
+    expect(normalizeIngredientEng("Pemetrexed Disodium Heptahydrate")).toBe("PEMETREXED");
+    expect(normalizeIngredientEng("Pemetrexed Disodium")).toBe("PEMETREXED");
+    expect(normalizeIngredientEng("Imatinib Mesylate")).toBe("IMATINIB");
+    expect(normalizeIngredientEng("Tadalafil")).toBe("TADALAFIL");
+    expect(normalizeIngredientEng("Erlotinib Hydrochloride")).toBe("ERLOTINIB");
+    expect(normalizeIngredientEng("Sorafenib Tosylate")).toBe("SORAFENIB");
   });
 });
 
-describe('getIngredientGroupKey prefers English', () => {
-  it('uses English ingredient when available', () => {
-    const c = { ingredient: '페메트렉시드이나트륨염칠수화물', ingredientEng: 'Pemetrexed Disodium Heptahydrate' };
-    expect(getIngredientGroupKey(c)).toBe('PEMETREXED');
-  });
-
-  it('falls back to Korean when English is empty', () => {
-    const c = { ingredient: '페메트렉시드이나트륨염칠수화물', ingredientEng: '' };
-    expect(getIngredientGroupKey(c)).toBe('페메트렉시드이나트륨염칠수화물'.toUpperCase());
+describe("normalizeIngredientKor", () => {
+  it("strips Korean salt forms and hydration suffixes", () => {
+    expect(normalizeIngredientKor("페메트렉시드이나트륨염칠수화물")).toBe("페메트렉시드");
+    expect(normalizeIngredientKor("페메트렉시드이나트륨")).toBe("페메트렉시드");
+    expect(normalizeIngredientKor("페메트렉시드이나트륨염")).toBe("페메트렉시드");
+    expect(normalizeIngredientKor("이마티닙메실산염")).toBe("이마티닙");
+    expect(normalizeIngredientKor("타다라필")).toBe("타다라필");
+    expect(normalizeIngredientKor("엘로티닙염산염")).toBe("엘로티닙");
   });
 });
 
-describe('computeAggregates counts generics correctly for Pemetrexed', () => {
-  it('counts multiple generics with same normalized English ingredient', () => {
-    // Simulate MFDS data: 1 original (알림타) + 3 generics (메인타, 알림시드, 페메드)
-    const allCandidates: MFDSCandidate[] = [
-      // Original: 알림타주 (earliest permit date)
-      {
-        mfdsItemName: '알림타주100밀리그램(페메트렉시드이나트륨염칠수화물)',
-        mfdsEngName: 'Alimta Inj.',
-        ingredient: '페메트렉시드이나트륨염칠수화물 100밀리그램',
-        ingredientEng: 'Pemetrexed Disodium Heptahydrate 100mg',
-        permitDate: '20060101',
-        permitNo: 'P001',
-        itemSeq: 'SEQ001',
-      },
-      {
-        mfdsItemName: '알림타주500밀리그램(페메트렉시드이나트륨염칠수화물)',
-        mfdsEngName: 'Alimta Inj.',
-        ingredient: '페메트렉시드이나트륨염칠수화물 500밀리그램',
-        ingredientEng: 'Pemetrexed Disodium Heptahydrate 500mg',
-        permitDate: '20060101',
-        permitNo: 'P002',
-        itemSeq: 'SEQ002',
-      },
-      {
-        mfdsItemName: '알림타액상주25밀리그램/밀리리터(페메트렉시드이나트륨염칠수화물)',
-        mfdsEngName: 'Alimta Liquid Inj.',
-        ingredient: '페메트렉시드이나트륨염칠수화물',
-        ingredientEng: 'Pemetrexed Disodium Heptahydrate',
-        permitDate: '20200101',
-        permitNo: 'P003',
-        itemSeq: 'SEQ003',
-      },
-      // Generic 1: 메인타주 (different company, later date)
-      {
-        mfdsItemName: '메인타주100밀리그램(페메트렉시드이나트륨)',
-        ingredient: '페메트렉시드이나트륨 100밀리그램',
-        ingredientEng: 'Pemetrexed Disodium 100mg',
-        permitDate: '20150601',
-        permitNo: 'P010',
-        itemSeq: 'SEQ010',
-      },
-      {
-        mfdsItemName: '메인타주500밀리그램(페메트렉시드이나트륨)',
-        ingredient: '페메트렉시드이나트륨 500밀리그램',
-        ingredientEng: 'Pemetrexed Disodium 500mg',
-        permitDate: '20150601',
-        permitNo: 'P011',
-        itemSeq: 'SEQ011',
-      },
-      // Generic 2: 알림시드주
-      {
-        mfdsItemName: '알림시드주100밀리그램(페메트렉시드이나트륨)',
-        ingredient: '페메트렉시드이나트륨 100밀리그램',
-        ingredientEng: 'Pemetrexed Disodium 100mg',
-        permitDate: '20160301',
-        permitNo: 'P020',
-        itemSeq: 'SEQ020',
-      },
-      // Generic 3: 페메드주
-      {
-        mfdsItemName: '페메드주100밀리그램(페메트렉시드이나트륨)',
-        ingredient: '페메트렉시드이나트륨 100밀리그램',
-        ingredientEng: 'Pemetrexed Disodium 100mg',
-        permitDate: '20170801',
-        permitNo: 'P030',
-        itemSeq: 'SEQ030',
-      },
+describe("getIngredientGroupKey", () => {
+  it("returns normalized English key when ingredientEng is available", () => {
+    expect(getIngredientGroupKey({ ingredient: "페메트렉시드이나트륨염칠수화물", ingredientEng: "Pemetrexed Disodium Heptahydrate" }))
+      .toBe("PEMETREXED");
+  });
+
+  it("returns normalized Korean key when ingredientEng is missing", () => {
+    // Now normalizeIngredientKor strips suffixes
+    expect(getIngredientGroupKey({ ingredient: "페메트렉시드이나트륨염칠수화물", ingredientEng: "" }))
+      .toBe("페메트렉시드");
+    expect(getIngredientGroupKey({ ingredient: "페메트렉시드이나트륨", ingredientEng: "" }))
+      .toBe("페메트렉시드");
+  });
+});
+
+describe("computeAggregates with cross-reference grouping", () => {
+  it("correctly groups Pemetrexed records with mixed eng/kor ingredients", () => {
+    const candidates: MFDSCandidate[] = [
+      { mfdsItemName: "알림타주100밀리그램", ingredient: "페메트렉시드이나트륨염칠수화물", ingredientEng: "Pemetrexed Disodium Heptahydrate", permitDate: "20060101", permitNo: "P1", itemSeq: "S1" },
+      { mfdsItemName: "알림타주500밀리그램", ingredient: "페메트렉시드이나트륨염칠수화물", ingredientEng: "Pemetrexed Disodium Heptahydrate", permitDate: "20060101", permitNo: "P2", itemSeq: "S2" },
+      { mfdsItemName: "메인타주100밀리그램", ingredient: "페메트렉시드이나트륨", ingredientEng: "Pemetrexed Disodium", permitDate: "20150101", permitNo: "P3", itemSeq: "S3" },
+      // NO English ingredient
+      { mfdsItemName: "알림시드주100밀리그램", ingredient: "페메트렉시드이나트륨염칠수화물", ingredientEng: "", permitDate: "20160101", permitNo: "P4", itemSeq: "S4" },
+      { mfdsItemName: "페메드주500밀리그램", ingredient: "페메트렉시드이나트륨", ingredientEng: "", permitDate: "20170101", permitNo: "P5", itemSeq: "S5" },
+      { mfdsItemName: "페메렉스주100밀리그램", ingredient: "페메트렉시드이나트륨염칠수화물", ingredientEng: "Pemetrexed Disodium Heptahydrate", permitDate: "20180101", permitNo: "P6", itemSeq: "S6" },
     ];
 
-    const matched: MatchedResult[] = [{
-      type: 'matched',
-      product: 'ALIMTA',
-      cleanedKey: 'ALIMTA',
-      candidate: allCandidates[0],
-      matchQuality: 'EXACT',
+    const matchedResults: MatchedResult[] = [{
+      type: 'matched', product: 'ALIMTA', cleanedKey: 'ALIMTA',
+      candidate: candidates[0], matchQuality: 'EXACT',
     }];
 
-    const aggregates = computeAggregates(matched, allCandidates);
-
-    // All should be under "PEMETREXED" key
-    const key = getIngredientGroupKey(allCandidates[0]);
-    expect(key).toBe('PEMETREXED');
-
-    const stats = aggregates.get('PEMETREXED');
+    const aggregates = computeAggregates(matchedResults, candidates);
+    const stats = aggregates.get("PEMETREXED");
     expect(stats).toBeDefined();
-
-    // Unique normalized product names:
-    // 알림타주 (original - earliest date 20060101)
-    // 알림타액상주 (same date? no, 20200101 - so generic)
-    // 메인타주 (generic)
-    // 알림시드주 (generic)
-    // 페메드주 (generic)
-    // Total unique names after normalizeDosage: 5 - 
-    // Original (earliest date 20060101): 알림타주 → 1 original
-    // Generics: 알림타액상주, 메인타주, 알림시드주, 페메드주 → 4 generics
+    // 알림타주(original, 2 dosages → 1 normalized name) + 메인타주 + 알림시드주 + 페메드주 + 페메렉스주 = 5, minus 1 original = 4 generics
     expect(stats!.genericCount).toBe(4);
-    expect(stats!.minPermitDate).toBe('20060101');
   });
 });

@@ -124,6 +124,44 @@ const PHARMA_SUFFIXES = [
   'XINAFOATE', 'NAPSYLATE', 'DECANOATE', 'ENANTHATE',
 ].sort((a, b) => b.length - a.length); // longest first to avoid partial matches
 
+// Korean pharmaceutical salt forms and hydration states to strip
+const KOREAN_PHARMA_SUFFIXES = [
+  '칠수화물', '육수화물', '오수화물', '사수화물', '삼수화물',
+  '이수화물', '일수화물', '반수화물', '수화물',
+  '이나트륨염', '일나트륨염', '나트륨염',
+  '이나트륨', '일나트륨', '나트륨',
+  '이칼륨', '일칼륨', '칼륨',
+  '이칼슘', '일칼슘', '칼슘',
+  '마그네슘',
+  '염산염', '황산염', '메실산염', '말레산염', '푸마르산염',
+  '타르타르산염', '주석산염', '구연산염', '인산염', '질산염',
+  '숙신산염', '베실산염', '토실산염', '아세트산염',
+  '브롬화물', '염화물', '요오드화물',
+  '메글루민', '트로메타민', '라이신', '아르기닌',
+].sort((a, b) => b.length - a.length);
+
+/**
+ * Normalize Korean ingredient name for grouping:
+ * strips dosage, Korean salt forms, and hydration states so that
+ * "페메트렉시드이나트륨염칠수화물" and "페메트렉시드이나트륨" → "페메트렉시드"
+ */
+export function normalizeIngredientKor(s: string): string {
+  let n = normalizeDosage(s);
+  // Repeatedly scan all suffixes until no more can be removed
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const suffix of KOREAN_PHARMA_SUFFIXES) {
+      if (n.endsWith(suffix)) {
+        n = n.slice(0, -suffix.length).trim();
+        changed = true;
+        break; // restart from longest suffix
+      }
+    }
+  }
+  return n.trim();
+}
+
 /**
  * Normalize English ingredient name for grouping:
  * strips dosage, salt forms, and hydration states so that
@@ -131,6 +169,8 @@ const PHARMA_SUFFIXES = [
  */
 export function normalizeIngredientEng(s: string): string {
   let n = normalizeDosage(s);
+  // Remove numbers between words (e.g. "Disodium 2.5 Hydrate" → "Disodium Hydrate")
+  n = n.replace(/\b[\d.,]+\b/g, '');
   for (const suffix of PHARMA_SUFFIXES) {
     n = n.replace(new RegExp('\\b' + suffix + '\\b', 'g'), '');
   }
@@ -139,12 +179,12 @@ export function normalizeIngredientEng(s: string): string {
 }
 
 /**
- * Get the best grouping key for an ingredient: prefer English (normalized), fallback to Korean.
+ * Get the best grouping key for an ingredient: prefer English (normalized), fallback to normalized Korean.
  */
 export function getIngredientGroupKey(candidate: { ingredient?: string; ingredientEng?: string }): string {
   const eng = (candidate.ingredientEng || '').trim();
   if (eng) return normalizeIngredientEng(eng);
-  return normalizeIngredient(candidate.ingredient || '');
+  return normalizeIngredientKor(candidate.ingredient || '');
 }
 
 // Clean English name for comparison
@@ -220,17 +260,43 @@ export function computeAggregates(
     }
   }
 
-  // Group by NORMALIZED ENGLISH ingredient (fallback to Korean)
-  // This ensures "Pemetrexed Disodium Heptahydrate" and "Pemetrexed Disodium" are in the same group
+  // Phase 1: Initial grouping by getIngredientGroupKey (English preferred, Korean fallback)
   const ingredientMap = new Map<string, { normalizedProductNames: Map<string, string>; minDate: string }>();
 
+  // Also build a mapping: normalized Korean ingredient → English group key (for cross-referencing)
+  const korToEngMap = new Map<string, string>(); // normalizedKor → engGroupKey
+
+  // First pass: build groups, and for records with BOTH eng and kor, record the mapping
   for (const [, c] of masterMap) {
-    const ingr = getIngredientGroupKey(c);
+    const eng = (c.ingredientEng || '').trim();
+    const kor = (c.ingredient || '').trim();
+    if (eng && kor) {
+      const engKey = normalizeIngredientEng(eng);
+      const korKey = normalizeIngredientKor(kor);
+      if (engKey && korKey) {
+        korToEngMap.set(korKey, engKey);
+      }
+    }
+  }
+
+  // Second pass: assign each candidate to a group, using cross-reference for Korean-only records
+  for (const [, c] of masterMap) {
+    let ingr = getIngredientGroupKey(c);
     if (!ingr) continue;
+
+    // If this record has no English ingredient, check if its normalized Korean maps to an English group
+    const eng = (c.ingredientEng || '').trim();
+    if (!eng) {
+      const korKey = normalizeIngredientKor(c.ingredient || '');
+      const mappedEngKey = korToEngMap.get(korKey);
+      if (mappedEngKey) {
+        ingr = mappedEngKey; // Merge into the English group
+      }
+    }
+
     const entry = ingredientMap.get(ingr) || { normalizedProductNames: new Map(), minDate: '99999999' };
     const normalizedName = normalizeDosage(c.mfdsItemName || '');
     if (normalizedName) {
-      // Track earliest permit date per normalized product name
       const existingDate = entry.normalizedProductNames.get(normalizedName) || '99999999';
       const dt = c.permitDate || '99999999';
       if (dt < existingDate) {
@@ -257,24 +323,60 @@ export function computeAggregates(
   return result;
 }
 
+/**
+ * Build a cross-reference map: normalizedKor → engGroupKey
+ * from candidates that have BOTH English and Korean ingredient names.
+ */
+function buildKorToEngMap(candidates: MFDSCandidate[]): Map<string, string> {
+  const korToEngMap = new Map<string, string>();
+  for (const c of candidates) {
+    const eng = (c.ingredientEng || '').trim();
+    const kor = (c.ingredient || '').trim();
+    if (eng && kor) {
+      const engKey = normalizeIngredientEng(eng);
+      const korKey = normalizeIngredientKor(kor);
+      if (engKey && korKey) {
+        korToEngMap.set(korKey, engKey);
+      }
+    }
+  }
+  return korToEngMap;
+}
+
+/**
+ * Resolve the ingredient group key with cross-referencing:
+ * if the candidate has no English ingredient, try to map its Korean ingredient
+ * to an English group key via the korToEngMap.
+ */
+function resolveIngredientGroupKey(
+  candidate: MFDSCandidate,
+  korToEngMap: Map<string, string>
+): string {
+  const eng = (candidate.ingredientEng || '').trim();
+  if (eng) return normalizeIngredientEng(eng);
+  const korKey = normalizeIngredientKor(candidate.ingredient || '');
+  const mappedEngKey = korToEngMap.get(korKey);
+  return mappedEngKey || korKey;
+}
+
 export function buildFinalRows(
   results: ProcessResult[],
   inputRows: { product: string; 순번?: string }[],
   allCandidates?: MFDSCandidate[]
 ): { matched: FinalRow[]; unmatched: UnmatchedRow[] } {
-  // Gather all matched for aggregation
   const allMatched = results.filter((r): r is MatchedResult => r.type === 'matched');
   const aggregates = computeAggregates(allMatched, allCandidates);
 
-  // Build ingredient group key → all unique MFDS product names map from all candidates
+  // Build korToEng cross-reference from all candidates
+  const korToEngMap = allCandidates ? buildKorToEngMap(allCandidates) : new Map<string, string>();
+
+  // Build ingredient group key → all unique MFDS product names map
   const ingredientProductNames = new Map<string, Set<string>>();
   if (allCandidates) {
     for (const c of allCandidates) {
-      const ingr = getIngredientGroupKey(c);
+      const ingr = resolveIngredientGroupKey(c, korToEngMap);
       if (!ingr || !c.mfdsItemName) continue;
-      if (!ingredientProductNames.has(ingr)) {
-        ingredientProductNames.set(ingr, new Set());
-      }
+      if (!ingredientProductNames.has(ingr)) ingredientProductNames.set(ingr, new Set());
       ingredientProductNames.get(ingr)!.add(c.mfdsItemName);
     }
   }
@@ -283,7 +385,7 @@ export function buildFinalRows(
   const ingredientOriginals = new Map<string, Set<string>>();
   if (allCandidates) {
     for (const c of allCandidates) {
-      const ingr = getIngredientGroupKey(c);
+      const ingr = resolveIngredientGroupKey(c, korToEngMap);
       if (!ingr || !c.mfdsItemName) continue;
       const stats = aggregates.get(ingr);
       if (stats && c.permitDate === stats.minPermitDate) {
@@ -320,13 +422,11 @@ export function buildFinalRows(
       continue;
     }
 
-    const ingr = getIngredientGroupKey(r.candidate);
+    const ingr = resolveIngredientGroupKey(r.candidate, korToEngMap);
     const stats = aggregates.get(ingr);
     const genericCount = stats?.genericCount || 0;
-    // B열: O if original product exists in MFDS for this ingredient, X if not
     const originalFlag = ingr && stats ? 'O' : 'X';
 
-    // Get all product names with the same normalized ingredient
     const allNames = ingredientProductNames.get(ingr);
     const mfdsItemName = allNames && allNames.size > 0
       ? [...allNames].join(', ')
