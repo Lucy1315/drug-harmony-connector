@@ -111,6 +111,7 @@ export function normalizeIngredient(s: string): string {
 const PHARMA_SUFFIXES = [
   'HEPTAHYDRATE', 'HEXAHYDRATE', 'PENTAHYDRATE', 'TETRAHYDRATE',
   'TRIHYDRATE', 'SESQUIHYDRATE', 'DIHYDRATE', 'MONOHYDRATE', 'HYDRATE',
+  'ANHYDROUS',
   'DISODIUM', 'TRISODIUM', 'MONOSODIUM', 'SODIUM', 'POTASSIUM', 'CALCIUM', 'MAGNESIUM',
   'HYDROCHLORIDE', 'DIHYDROCHLORIDE', 'MONOHYDROCHLORIDE',
   'MESYLATE', 'MESILATE', 'MALEATE', 'FUMARATE', 'HEMIFUMARATE',
@@ -122,12 +123,13 @@ const PHARMA_SUFFIXES = [
   'VALERATE', 'PROPIONATE', 'BUTYRATE', 'FUROATE', 'DIPROPIONATE',
   'PAMOATE', 'EMBONATE', 'STEARATE', 'PALMITATE',
   'XINAFOATE', 'NAPSYLATE', 'DECANOATE', 'ENANTHATE',
+  'MICRONIZED',
 ].sort((a, b) => b.length - a.length); // longest first to avoid partial matches
 
 // Korean pharmaceutical salt forms and hydration states to strip
 const KOREAN_PHARMA_SUFFIXES = [
   '칠수화물', '육수화물', '오수화물', '사수화물', '삼수화물',
-  '이수화물', '일수화물', '반수화물', '수화물',
+  '이수화물', '일수화물', '반수화물', '수화물', '무수물',
   '이나트륨염', '일나트륨염', '나트륨염',
   '이나트륨', '일나트륨', '나트륨',
   '이칼륨', '일칼륨', '칼륨',
