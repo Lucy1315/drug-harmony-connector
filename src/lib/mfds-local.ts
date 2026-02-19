@@ -33,6 +33,24 @@ function parsePermitDate(raw: any): string {
   return s.replace(/[^0-9]/g, '').slice(0, 8);
 }
 
+/** Dynamically find and parse the 신약구분 (new drug classification) field */
+function findNewDrugField(row: any): boolean {
+  // Try exact column name first
+  const exactKeys = ['신약구분', '신약 구분', 'NEW_DRUG', 'newDrug'];
+  for (const key of exactKeys) {
+    if (row[key] !== undefined) {
+      return String(row[key]).trim().toUpperCase() === 'Y';
+    }
+  }
+  // Dynamic search: look for any column header containing '신약'
+  for (const key of Object.keys(row)) {
+    if (key.includes('신약')) {
+      return String(row[key]).trim().toUpperCase() === 'Y';
+    }
+  }
+  return false;
+}
+
 async function loadFromExcel(): Promise<MFDSCandidate[]> {
   const response = await fetch('/data/mfds-data.xlsx');
   const buffer = await response.arrayBuffer();
@@ -48,6 +66,9 @@ async function loadFromExcel(): Promise<MFDSCandidate[]> {
     const status = String(row['취소/취하'] || '').trim();
     if (status === '취하' || status === '취소') continue;
 
+    // Dynamically find 신약구분 column (may vary in name/position)
+    const newDrugVal = findNewDrugField(row);
+    
     candidates.push({
       mfdsItemName: itemName,
       mfdsEngName: String(row['제품영문명'] || '').trim(),
@@ -57,6 +78,7 @@ async function loadFromExcel(): Promise<MFDSCandidate[]> {
       permitNo: String(row['허가번호'] || '').trim(),
       itemSeq: String(row['품목기준코드'] || '').trim(),
       companyName: String(row['업체명'] || '').trim(),
+      isNewDrug: newDrugVal,
     });
   }
 

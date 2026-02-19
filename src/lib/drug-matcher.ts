@@ -37,6 +37,7 @@ export interface MFDSCandidate {
   permitNo: string;
   itemSeq: string;
   companyName?: string;
+  isNewDrug?: boolean; // 신약구분 'Y' = originator drug
 }
 
 export interface MatchedResult {
@@ -311,14 +312,44 @@ export function computeAggregates(
   }
 
   // Count generics = total unique product names MINUS original product names
-  // Original = product(s) with the earliest permit date for that ingredient
+  // Original = product(s) marked as 신약구분='Y' (isNewDrug), or fallback to earliest permit date
   const result = new Map<string, { genericCount: number; minPermitDate: string }>();
   for (const [ingr, data] of ingredientMap) {
     const { normalizedProductNames, minDate } = data;
-    let originalCount = 0;
-    for (const [, productDate] of normalizedProductNames) {
-      if (productDate === minDate) originalCount++;
+    
+    // Check if any product in this group has isNewDrug=true
+    const newDrugProducts = new Set<string>();
+    for (const [, c] of masterMap) {
+      const cIngr = getIngredientGroupKey(c);
+      const eng = (c.ingredientEng || '').trim();
+      let resolvedIngr = cIngr;
+      if (!eng) {
+        const korKey = normalizeIngredientKor(c.ingredient || '');
+        const mappedEngKey = korToEngMap.get(korKey);
+        if (mappedEngKey) resolvedIngr = mappedEngKey;
+      }
+      if (resolvedIngr === ingr && c.isNewDrug) {
+        newDrugProducts.add(normalizeDosage(c.mfdsItemName || ''));
+      }
     }
+    
+    let originalCount: number;
+    if (newDrugProducts.size > 0) {
+      // Use 신약구분 to identify originals
+      originalCount = 0;
+      for (const [prodName] of normalizedProductNames) {
+        if (newDrugProducts.has(prodName)) originalCount++;
+      }
+      // If none of the normalized names matched (shouldn't happen), fallback
+      if (originalCount === 0) originalCount = 1;
+    } else {
+      // Fallback: use earliest permit date
+      originalCount = 0;
+      for (const [, productDate] of normalizedProductNames) {
+        if (productDate === minDate) originalCount++;
+      }
+    }
+    
     const genericCount = normalizedProductNames.size - originalCount;
     result.set(ingr, { genericCount, minPermitDate: minDate });
   }
@@ -383,12 +414,23 @@ export function buildFinalRows(
     }
   }
 
-  // Build ingredient group key → original product names (earliest permit date)
+  // Build ingredient group key → original product names (신약구분=Y, or fallback to earliest permit date)
   const ingredientOriginals = new Map<string, Set<string>>();
   if (allCandidates) {
+    // First pass: collect 신약구분=Y products per ingredient
     for (const c of allCandidates) {
       const ingr = resolveIngredientGroupKey(c, korToEngMap);
       if (!ingr || !c.mfdsItemName) continue;
+      if (c.isNewDrug) {
+        if (!ingredientOriginals.has(ingr)) ingredientOriginals.set(ingr, new Set());
+        ingredientOriginals.get(ingr)!.add(c.mfdsItemName);
+      }
+    }
+    // Second pass: for ingredients without 신약구분 markers, fallback to earliest permit date
+    for (const c of allCandidates) {
+      const ingr = resolveIngredientGroupKey(c, korToEngMap);
+      if (!ingr || !c.mfdsItemName) continue;
+      if (ingredientOriginals.has(ingr)) continue; // already has 신약구분 data
       const stats = aggregates.get(ingr);
       if (stats && c.permitDate === stats.minPermitDate) {
         if (!ingredientOriginals.has(ingr)) ingredientOriginals.set(ingr, new Set());
